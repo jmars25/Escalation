@@ -32,7 +32,7 @@ export function canEnter(s: GameState, force: Force, h: Hex): boolean {
   const t = s.tiles[key(h)]
   if (!t) return false
   if (force.type === 'naval_group') {
-    if (t.terrain === 'sea' || t.terrain === 'island') return true
+    if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
     return s.installations.some((i) => i.type === 'naval_base' && i.owner === force.owner && hexEquals(i.hex, h))
   }
   if (force.type === 'missile_battery') return t.terrain !== 'mountain'
@@ -71,7 +71,7 @@ function isDeployTarget(s: GameState, force: Force, h: Hex): boolean {
   if (!t) return false
   if (tileDefenders(s, h, s.factions[force.owner].alignment).length > 0) return false
   if (force.type === 'naval_group') {
-    if (t.terrain === 'sea' || t.terrain === 'island') return true
+    if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
     return t.owner === force.owner // docking at own naval base on land
   }
   return t.owner === force.owner

@@ -23,6 +23,8 @@ export interface Tile {
   disputedBy?: FactionId[]
   /** A demilitarized zone — claiming it (moving troops in) is a major political act. */
   dmz?: boolean
+  /** Sea or island tile that is part of the strait — the only water naval units may navigate. */
+  strait?: boolean
   terrain: Terrain
 }
 

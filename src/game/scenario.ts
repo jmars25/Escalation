@@ -86,7 +86,7 @@ export const FACTIONS: FactionDef[] = [
 // (within a row, q+1 moves right one hex). Omit `sea` for normal land.
 // To add a tile: copy a neighbor's {q,r} and adjust q±1 (same row) or r+1 (next row).
 // To move a tile: change its q/r values here.
-type TileDef = { q: number; r: number; owner?: FactionId; sea?: true; island?: true; disputed?: FactionId[]; dmz?: true }
+type TileDef = { q: number; r: number; owner?: FactionId; sea?: true; island?: true; strait?: true; disputed?: FactionId[]; dmz?: true }
 
 const TILES: TileDef[] = [
   // r=0 — northern edge
@@ -95,8 +95,8 @@ const TILES: TileDef[] = [
   { q: 3,  r: 0, owner: 'aurelia'  },
   { q: 4,  r: 0, owner: 'aurelia'  },
   { q: 5,  r: 0, owner: 'khorul'   },
-  { q: 6,  r: 0, sea: true },
-  { q: 7,  r: 0, sea: true },
+  { q: 6,  r: 0, sea: true, strait: true },
+  { q: 7,  r: 0, sea: true, strait: true },
   { q: 8,  r: 0, owner: 'drovenia' },
   { q: 9,  r: 0, owner: 'drovenia' },
   { q: 10, r: 0, owner: 'volkaria' },
@@ -109,8 +109,8 @@ const TILES: TileDef[] = [
   { q: 3,  r: 1, owner: 'aurelia'  },
   { q: 4,  r: 1, owner: 'aurelia'  },
   { q: 5,  r: 1, owner: 'khorul'   },
-  { q: 6,  r: 1, sea: true },
-  { q: 7,  r: 1, sea: true },
+  { q: 6,  r: 1, sea: true, strait: true },
+  { q: 7,  r: 1, sea: true, strait: true },
   { q: 8,  r: 1, disputed: ['drovenia', 'esquana'] }, // drovenia/esquana flashpoint
   { q: 9,  r: 1, owner: 'drovenia' },
   { q: 10, r: 1, owner: 'volkaria' },
@@ -124,8 +124,8 @@ const TILES: TileDef[] = [
   { q: 2,  r: 2, owner: 'aurelia'  },
   { q: 3,  r: 2, owner: 'aurelia'  },
   { q: 4,  r: 2, owner: 'khorul'   },
-  { q: 5,  r: 2, sea: true },
-  { q: 6,  r: 2, sea: true },
+  { q: 5,  r: 2, sea: true, strait: true },
+  { q: 6,  r: 2, sea: true, strait: true },
   { q: 7,  r: 2, owner: 'esquana'  },
   { q: 8,  r: 2, owner: 'drovenia' },
   { q: 9,  r: 2, owner: 'drovenia' },
@@ -139,8 +139,8 @@ const TILES: TileDef[] = [
   { q: 2,  r: 3, owner: 'aurelia'  },
   { q: 3,  r: 3, owner: 'kazrek'   },
   { q: 4,  r: 3, owner: 'khorul'   },
-  { q: 5,  r: 3, sea: true }, // strait island
-  { q: 6,  r: 3, sea: true },
+  { q: 5,  r: 3, sea: true, strait: true },
+  { q: 6,  r: 3, sea: true, strait: true },
   { q: 7,  r: 3, owner: 'esquana'  },
   { q: 8,  r: 3, owner: 'tamarisk' },
   { q: 9,  r: 3, owner: 'drovenia' },
@@ -154,8 +154,8 @@ const TILES: TileDef[] = [
   { q: 1,  r: 4, owner: 'kazrek'   },
   { q: 2,  r: 4, owner: 'kazrek'   },
   { q: 3,  r: 4, owner: 'khorul'   },
-  { q: 4,  r: 4, sea: true },
-  { q: 5,  r: 4, sea: true },
+  { q: 4,  r: 4, sea: true, strait: true },
+  { q: 5,  r: 4, sea: true, strait: true },
   { q: 6,  r: 4, owner: 'esquana'  },
   { q: 7,  r: 4, owner: 'tamarisk' },
   { q: 8,  r: 4, owner: 'volkaria' },
@@ -168,9 +168,9 @@ const TILES: TileDef[] = [
   { q: 0,  r: 5, owner: 'aurelia'  },
   { q: 1,  r: 5, owner: 'aurelia'  },
   { q: 2,  r: 5, owner: 'kazrek'   },
-  { q: 3,  r: 5, sea: true },
-  { q: 4,  r: 5, sea: true },
-  { q: 5,  r: 5, sea: true },
+  { q: 3,  r: 5, sea: true, strait: true },
+  { q: 4,  r: 5, sea: true, strait: true },
+  { q: 5,  r: 5, sea: true, strait: true },
   { q: 6,  r: 5, owner: 'esquana'  },
   { q: 7,  r: 5, owner: 'tamarisk' },
   { q: 8,  r: 5, owner: 'volkaria' },
@@ -183,9 +183,9 @@ const TILES: TileDef[] = [
   { q: -1, r: 6, owner: 'solvenn'  },
   { q: 0,  r: 6, owner: 'aurelia'  },
   { q: 1,  r: 6, disputed: ['kazrek', 'aurelia'], dmz: true }, // DMZ flashpoint
-  { q: 2,  r: 6, sea: true },
-  { q: 3,  r: 6, island: true, disputed: ['volkaria', 'aurelia']},
-  { q: 4,  r: 6, sea: true },
+  { q: 2,  r: 6, sea: true, strait: true },
+  { q: 3,  r: 6, island: true, strait: true, disputed: ['volkaria', 'aurelia'] },
+  { q: 4,  r: 6, sea: true, strait: true },
   { q: 5,  r: 6, owner: 'esquana'  },
   { q: 6,  r: 6, owner: 'tamarisk' },
   { q: 7,  r: 6, owner: 'volkaria' },
@@ -198,9 +198,9 @@ const TILES: TileDef[] = [
   { q: -1, r: 7, owner: 'solvenn'  },
   { q: 0,  r: 7, owner: 'aurelia'  },
   { q: 1,  r: 7, owner: 'aurelia'  },
-  { q: 2,  r: 7, sea: true },
-  { q: 3,  r: 7, sea: true },
-  { q: 4,  r: 7, sea: true },
+  { q: 2,  r: 7, sea: true, strait: true },
+  { q: 3,  r: 7, sea: true, strait: true },
+  { q: 4,  r: 7, sea: true, strait: true },
   { q: 5,  r: 7, owner: 'esquana'  },
   { q: 6,  r: 7, owner: 'volkaria' },
   { q: 7,  r: 7, owner: 'volkaria' },
@@ -268,6 +268,7 @@ export function buildInitialState(): GameState {
       contested: !!def.disputed,
       disputedBy: def.disputed,
       dmz: def.dmz ?? false,
+      strait: def.strait ?? false,
     }
   }
 

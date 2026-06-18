@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
 import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, procurementRate, projectCost } from '../game/engine'
 import { key } from '../game/hexUtils'
@@ -29,6 +30,7 @@ const POLICIES: ProcurementPolicy[] = ['civilian', 'contracts', 'emergency', 'dr
 const BURDENS: ProcurementBurden[] = ['low', 'standard', 'high', 'crisis']
 
 export function Sidebar() {
+  const [confirmRestart, setConfirmRestart] = useState(false)
   const game = useGameStore((s) => s.game)
   const selectedForceId = useGameStore((s) => s.selectedForceId)
   const selectedInstallId = useGameStore((s) => s.selectedInstallId)
@@ -65,9 +67,18 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="panel">
-        <div className="row-between">
-          <h1>ESCALATION</h1>
+        <h1>ESCALATION</h1>
+        <div className="row-between" style={{ marginTop: '4px' }}>
           <span className="turn">Round {game.turn}</span>
+          {confirmRestart ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem' }}>
+              Sure?
+              <button className="ghost" onClick={() => { reset(); setConfirmRestart(false) }} style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Yes</button>
+              <button className="ghost" onClick={() => setConfirmRestart(false)} style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Cancel</button>
+            </span>
+          ) : (
+            <button className="ghost" onClick={() => setConfirmRestart(true)} style={{ fontSize: '0.7rem', padding: '2px 8px' }}>Restart</button>
+          )}
         </div>
 
       </div>

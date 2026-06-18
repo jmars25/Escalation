@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { AidPackageType, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 import { buildInitialState } from '../game/scenario'
 import {
@@ -76,7 +77,7 @@ function buildOpeningState(): { game: GameState; lastAttack: AttackFx | null } {
   }
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
+export const useGameStore = create<GameStore>()(persist((set, get) => ({
   game: buildInitialState(),
   introPending: true,
   selectedForceId: null,
@@ -283,6 +284,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   reset: () => set({ game: buildInitialState(), introPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], lastStrike: null, lastAttack: null, pendingTrade: {} }),
+}), {
+  name: 'escalation-save',
+  partialize: (s) => ({ game: s.game, pendingTrade: s.pendingTrade, introPending: s.introPending }),
 }))
 
 // Dev aid: inspect/poke game state from the console (and from preview tooling).
