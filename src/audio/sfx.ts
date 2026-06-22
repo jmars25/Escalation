@@ -53,11 +53,9 @@ export const sfx = {
     tone(523, 70, 'square', 0.04)
     setTimeout(() => tone(784, 110, 'square', 0.04), 70)
   },
-  /** Pitch rises with escalation so the end-of-turn cue reflects tension. */
-  endTurn(escalation: number) {
-    const base = 200 + escalation * 4
-    tone(base, 120, 'sawtooth', 0.04)
-    setTimeout(() => tone(base * 1.5, 140, 'sawtooth', 0.03), 110)
+  endTurn() {
+    tone(280, 120, 'sawtooth', 0.04)
+    setTimeout(() => tone(420, 140, 'sawtooth', 0.03), 110)
   },
   alert() {
     tone(660, 120, 'square', 0.06)

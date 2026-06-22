@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
 import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, procurementRate, projectCost } from '../game/engine'
 import { key } from '../game/hexUtils'
-import type { ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
+import type { CeasefireRequest, GameState, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 
 
 const FORCE_NOTE: Record<string, string> = {
@@ -28,9 +28,30 @@ const BURDEN_LABEL: Record<ProcurementBurden, string> = {
 const PROJECTS: ProcurementProjectType[] = ['army_group', 'missile_battery', 'naval_group', 'air_base', 'naval_base']
 const POLICIES: ProcurementPolicy[] = ['civilian', 'contracts', 'emergency', 'draft']
 const BURDENS: ProcurementBurden[] = ['low', 'standard', 'high', 'crisis']
+const CASUALTY_FORMAT = new Intl.NumberFormat('en-US')
+
+function requestTitle(game: GameState, request: CeasefireRequest): string {
+  const from = game.factions[request.from]?.name ?? request.from
+  const to = game.factions[request.counterpartId ?? request.to]?.name ?? (request.counterpartId ?? request.to)
+  if (request.kind === 'mediation') return `${from} mediates peace with ${to}`
+  if (request.kind === 'peace_offer') return `${from} offers peace`
+  return `${from} asks for ceasefire`
+}
+
+function termText(game: GameState, request: CeasefireRequest): string[] {
+  return (request.terms ?? []).map((term) =>
+    `Return (${term.hex.q},${term.hex.r}) from ${game.factions[term.from]?.name ?? term.from} to ${game.factions[term.to]?.name ?? term.to}`,
+  )
+}
 
 export function Sidebar() {
   const [confirmRestart, setConfirmRestart] = useState(false)
+  const [diploTarget, setDiploTarget] = useState('')
+  const [diploMessage, setDiploMessage] = useState('')
+  const [mediateSideA, setMediateSideA] = useState('')
+  const [mediateSideB, setMediateSideB] = useState('')
+  const [mediateMessage, setMediateMessage] = useState('')
+  const [ceasefireReply, setCeasefireReply] = useState('')
   const game = useGameStore((s) => s.game)
   const selectedForceId = useGameStore((s) => s.selectedForceId)
   const selectedInstallId = useGameStore((s) => s.selectedInstallId)
@@ -41,10 +62,16 @@ export function Sidebar() {
   const cancelAction = useGameStore((s) => s.cancelAction)
   const endTurn = useGameStore((s) => s.endTurn)
   const reset = useGameStore((s) => s.reset)
+  const runAiTurn = useGameStore((s) => s.runAiTurn)
+  const aiPending = useGameStore((s) => s.aiPending)
   const setPolicy = useGameStore((s) => s.setProcurementPolicy)
   const setBurden = useGameStore((s) => s.setProcurementBurden)
   const startProject = useGameStore((s) => s.startProcurement)
   const sendAid = useGameStore((s) => s.sendAidPackage)
+  const sendMessage = useGameStore((s) => s.sendDiplomaticMessage)
+  const mediatePeace = useGameStore((s) => s.mediatePeace)
+  const requestCeasefire = useGameStore((s) => s.requestCeasefire)
+  const answerCeasefire = useGameStore((s) => s.respondCeasefire)
 
   const currentId = game.order[game.turnIndex]
   const current = game.factions[currentId]
@@ -61,8 +88,38 @@ export function Sidebar() {
   const project = proc.project
   const rate = procurementRate(game, currentId)
   const progressPct = project ? Math.min(100, (project.progress / projectCost(project.type)) * 100) : 0
+  const globalDeaths = game.deathToll ?? 0
+  const currentDeaths = game.factionDeaths?.[currentId] ?? 0
   const allies = Object.values(game.factions)
     .filter((f) => f.id !== currentId && f.alignment === current.alignment && current.alignment !== 'neutral')
+  const diplomacyTargets = Object.values(game.factions).filter((f) => f.id !== currentId)
+  const selectedDiploTarget = diplomacyTargets.some((f) => f.id === diploTarget) ? diploTarget : diplomacyTargets[0]?.id || ''
+  const mediationTargets = Object.values(game.factions)
+  const selectedMediateA = mediationTargets.some((f) => f.id === mediateSideA) ? mediateSideA : mediationTargets[0]?.id || ''
+  const selectedMediateB =
+    mediationTargets.some((f) => f.id === mediateSideB && f.id !== selectedMediateA)
+      ? mediateSideB
+      : mediationTargets.find((f) => f.id !== selectedMediateA)?.id || ''
+  const incomingCeasefires = (game.ceasefireRequests ?? []).filter((request) => request.to === currentId)
+  const canSendDiplomacy = !!selectedDiploTarget && diploMessage.trim().length > 0 && !aiPending
+  const selectedPair = [currentId, selectedDiploTarget].sort().join('|')
+  const ceasefireUnavailable =
+    (game.ceasefires ?? []).includes(selectedPair) ||
+    (game.ceasefireRequests ?? []).some((request) =>
+      (request.from === currentId && request.to === selectedDiploTarget) ||
+      (request.from === selectedDiploTarget && request.to === currentId),
+    )
+  const mediationPair = [selectedMediateA, selectedMediateB].sort().join('|')
+  const mediationUnavailable =
+    !selectedMediateA ||
+    !selectedMediateB ||
+    selectedMediateA === selectedMediateB ||
+    (game.ceasefires ?? []).includes(mediationPair)
+  const mediationText =
+    mediateMessage.trim() ||
+    diploMessage.trim() ||
+    'We ask both governments to accept a mediated pause in hostilities and prevent further escalation.'
+  const canMediate = !aiPending && !mediationUnavailable
 
   return (
     <aside className="sidebar">
@@ -79,6 +136,10 @@ export function Sidebar() {
           ) : (
             <button className="ghost" onClick={() => setConfirmRestart(true)} style={{ fontSize: '0.7rem', padding: '2px 8px' }}>Restart</button>
           )}
+        </div>
+        <div className="death-toll">
+          <span>Death toll <strong>{CASUALTY_FORMAT.format(globalDeaths)}</strong></span>
+          <span>{current.name} deaths <strong>{CASUALTY_FORMAT.format(currentDeaths)}</strong></span>
         </div>
 
       </div>
@@ -113,12 +174,12 @@ export function Sidebar() {
             <h2>Procurement</h2>
             <div className="seg-row">
               {POLICIES.map((p) => (
-                <button key={p} className={proc.policy === p ? 'active' : ''} onClick={() => setPolicy(p)}>{POLICY_LABEL[p]}</button>
+                <button key={p} disabled={aiPending} className={proc.policy === p ? 'active' : ''} onClick={() => setPolicy(p)}>{POLICY_LABEL[p]}</button>
               ))}
             </div>
             <div className="seg-row compact">
               {BURDENS.map((b) => (
-                <button key={b} className={proc.burden === b ? 'active' : ''} onClick={() => setBurden(b)}>{BURDEN_LABEL[b]}</button>
+                <button key={b} disabled={aiPending} className={proc.burden === b ? 'active' : ''} onClick={() => setBurden(b)}>{BURDEN_LABEL[b]}</button>
               ))}
             </div>
             <div className="proc-status">
@@ -139,7 +200,7 @@ export function Sidebar() {
                 const army = p === 'army_group'
                 const hardware = !army
                 const disabled = (army && proc.policy !== 'draft') || (hardware && proc.policy !== 'contracts' && proc.policy !== 'emergency')
-                return <button key={p} disabled={disabled} onClick={() => startProject(p)}>{PROJECT_LABEL[p]}</button>
+                return <button key={p} disabled={disabled || aiPending} onClick={() => startProject(p)}>{PROJECT_LABEL[p]}</button>
               })}
             </div>
             {allies.length > 0 && (
@@ -147,12 +208,86 @@ export function Sidebar() {
                 {allies.map((ally) => (
                   <div key={ally.id} className="aid-row">
                     <span>{ally.name}</span>
-                    <button onClick={() => sendAid(ally.id, 'economic')}>Economic Aid</button>
-                    <button onClick={() => sendAid(ally.id, 'arms')}>Arms</button>
+                    <button disabled={aiPending} onClick={() => sendAid(ally.id, 'economic')}>Economic Aid</button>
+                    <button disabled={aiPending} onClick={() => sendAid(ally.id, 'arms')}>Arms</button>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="panel diplomacy-panel">
+            <h2>Diplomacy</h2>
+            {incomingCeasefires.length > 0 && (
+              <div className="ceasefire-inbox">
+                {incomingCeasefires.map((request) => (
+                  <div key={request.id} className="ceasefire-request">
+                    <strong>{requestTitle(game, request)}</strong>
+                    <p>{request.message}</p>
+                    {termText(game, request).map((term) => <p key={term} className="hint flush">{term}</p>)}
+                    <textarea
+                      value={ceasefireReply}
+                      onChange={(event) => setCeasefireReply(event.target.value)}
+                      placeholder="Response, max 3 sentences"
+                      maxLength={420}
+                      rows={2}
+                    />
+                    <div className="action-row">
+                      <button disabled={aiPending} onClick={() => { answerCeasefire(request.id, true, ceasefireReply); setCeasefireReply('') }}>Accept</button>
+                      <button disabled={aiPending} onClick={() => { answerCeasefire(request.id, false, ceasefireReply); setCeasefireReply('') }}>Reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={aiPending}>
+              {diplomacyTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            <textarea
+              value={diploMessage}
+              onChange={(event) => setDiploMessage(event.target.value)}
+              placeholder="Diplomatic message, max 3 sentences"
+              maxLength={420}
+              rows={3}
+              disabled={aiPending}
+            />
+            <div className="action-row">
+              <button
+                disabled={!canSendDiplomacy}
+                onClick={() => { sendMessage(selectedDiploTarget, diploMessage); setDiploMessage('') }}
+              >Send</button>
+              <button
+                disabled={!canSendDiplomacy || ceasefireUnavailable}
+                onClick={() => { void requestCeasefire(selectedDiploTarget, diploMessage); setDiploMessage('') }}
+              >Ask Ceasefire</button>
+            </div>
+            <div className="mediation-box">
+              <div className="mediation-row">
+                <select value={selectedMediateA} onChange={(event) => setMediateSideA(event.target.value)} disabled={aiPending}>
+                  {mediationTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <select value={selectedMediateB} onChange={(event) => setMediateSideB(event.target.value)} disabled={aiPending}>
+                  {mediationTargets.filter((f) => f.id !== selectedMediateA).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+              <textarea
+                value={mediateMessage}
+                onChange={(event) => setMediateMessage(event.target.value)}
+                placeholder="Mediation proposal, max 3 sentences"
+                maxLength={420}
+                rows={2}
+                disabled={aiPending}
+              />
+              <button
+                className="ghost full"
+                disabled={!canMediate}
+                onClick={() => {
+                  void mediatePeace(selectedMediateA, selectedMediateB, mediationText)
+                  setMediateMessage('')
+                  if (!mediateMessage.trim()) setDiploMessage('')
+                }}
+              >Mediate Peace</button>
+            </div>
           </div>
 
           <div className="panel">
@@ -168,7 +303,7 @@ export function Sidebar() {
                   <span className="dot" style={{ background: game.factions[selectedBase.owner].color }} />
                   Air base <span className="ftype">· {baseCharges}/{selectedBase.maxCharges ?? 2} sorties</span>
                 </div>
-                <p className="hint">Launch aircraft at any enemy in range. Devastating against army groups.</p>
+                <p className="hint">Launch aircraft at any opposing force in range. Devastating against army groups.</p>
                 <div className="action-row">
                   <button disabled={baseCharges < 1} onClick={() => enterAirStrike('limited')}>Limited</button>
                   <button disabled={baseCharges < 2} onClick={() => enterAirStrike('full')}>Full</button>
@@ -195,8 +330,12 @@ export function Sidebar() {
           </div>
 
           <div className="panel actions">
-            <button className="primary" onClick={endTurn} style={{ background: current.color }}>End {current.name}’s Turn ▸</button>
-            <button className="ghost" onClick={reset}>Restart</button>
+            <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={aiPending}>
+              End {current.name}’s Turn ▸
+            </button>
+            <button className="ghost" onClick={() => void runAiTurn()} disabled={aiPending}>
+              {aiPending ? "AI thinking..." : "AI: Take Turn"}
+            </button>
           </div>
         </>
       )}

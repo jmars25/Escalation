@@ -4,7 +4,7 @@
 // trouble, and disputed flashpoint hexes. Edit the MAP grid to reshape the world.
 
 import type {
-  Alignment, Faction, FactionId, Force, ForceType, GameState, Hex, Installation, InstallationType, Tile,
+  Faction, FactionId, Force, ForceType, GameState, Hex, Installation, InstallationType, Tile,
 } from './types'
 import { distance, key, neighbors } from './hexUtils'
 
@@ -35,16 +35,16 @@ export const FACTIONS: FactionDef[] = [
     objectives: ['Stop the theocratic bloc revising borders by force', 'Hold the democratic coalition together'],
     support: 72, disposition: 100 },
   { id: 'mirelle', name: 'Mirelle', type: 'ally', alignment: 'coalition', color: '#38bdf8',
-    doctrine: 'A frontline democracy, exposed and nervous. Wants protection but fears becoming a battleground.',
-    redLines: ['Abandonment by Aurelia'], objectives: ['Survive the crisis with borders intact'],
+    doctrine: 'A backline allied democracy that tries to avoid conflict whenever possible without becoming apathetic toward Aurelia. It favors support, diplomacy, and rear-area assistance over direct exposure.',
+    redLines: ['Being dragged into direct war without consultation'], objectives: ['Support Aurelia while avoiding escalation', 'Keep the coalition engaged without becoming a battlefield'],
     support: 60, disposition: 70 },
   { id: 'solvenn', name: 'Solvenn', type: 'ally', alignment: 'coalition', color: '#22d3ee',
-    doctrine: 'A wealthy rear-area democracy. Generous with trade and money, stingy with risk.',
-    redLines: ['Direct attack on its territory'], objectives: ['Support Aurelia at minimal exposure'],
-    support: 66, disposition: 60 },
+    doctrine: 'A strong supporter of the Aurelian bloc that sees the territory between Solvenn and the Volkarian bloc as a vital strategic buffer. It backs Aurelia firmly and wants the buffer states kept out of Volkarian reach.',
+    redLines: ['Direct attack on its territory', 'Volkarian control of the buffer zone'], objectives: ['Keep a secure buffer between Solvenn and Volkaria', 'Back Aurelia as the bloc leader', 'avoid strikes on own territory'],
+    support: 66, disposition: 78 },
   { id: 'tamarisk', name: 'Tamarisk', type: 'ally', alignment: 'coalition', color: '#2dd4bf',
-    doctrine: 'A hawkish democracy stranded as an enclave on the theocratic landmass, ringed by hostile territory. Eager to prove itself.',
-    redLines: ['Being cut off or overrun'], objectives: ['Hold the enclave', 'Force Aurelia to guarantee its security'],
+    doctrine: 'A hawkish but vulnerable democracy stranded as an enclave on the theocratic landmass, ringed by hostile territory and dependent on Aurelian support. It wants to prove resolve, but knows that attacking neutrals or launching offensives without clear coalition backing, a direct threat, or a plausible path to victory could leave it isolated and destroyed.',
+    redLines: ['Being cut off or overrun', 'Being abandoned by Aurelia after a crisis it did not choose'], objectives: ['Hold the enclave', 'Force Aurelia to guarantee its security', 'Avoid reckless attacks that unite neighbors against it'],
     support: 64, disposition: 75 },
 
   // --- Theocratic bloc (the rival + its clients) ---
@@ -54,13 +54,13 @@ export const FACTIONS: FactionDef[] = [
     objectives: ['Advance the Creed’s claims', 'Split the democratic coalition'],
     support: 80, disposition: -40 },
   { id: 'drovenia', name: 'Drovenia', type: 'ally', alignment: 'bloc', color: '#f97316',
-    doctrine: 'A devout client of Volkaria, eager to act as the Creed’s sword and willing to move first.',
-    redLines: ['Volkaria withdrawing its protection'], objectives: ['Advance the bloc’s claims'],
+    doctrine: 'A militarized dictatorship built around regime survival, internal control, and coercive force. It is heavily armed, paranoid, and willing to use crises abroad to reinforce obedience at home.',
+    redLines: ['Threats to regime survival', 'Foreign-backed unrest'], objectives: ['Preserve the dictatorship', 'Use force to secure contested territory'],
     support: 70, disposition: -55 },
   { id: 'kazrek', name: 'Kazrek', type: 'ally', alignment: 'bloc', color: '#f43f5e',
-    doctrine: 'A radical theocracy and zealous client of the Creed, stranded as an enclave inside the democratic landmass. It holds a religious claim to the neighboring demilitarized zone and is fervent enough to seize it — backing it down is hard, and its people rally to defiance.',
+    doctrine: 'A radical theocracy and zealous client of the Creed, stranded as an enclave inside the democratic landmass. It holds a religious claim to the neighboring demilitarized zone and is fervent enough to seize it; backing it down is hard, its people rally to defiance, and it should resist ceasefires unless battlefield losses, isolation, or regime danger make a pause necessary.',
     redLines: ['Surrendering its claim to the holy ground', 'Coalition forces encircling the enclave'],
-    objectives: ['Seize the DMZ it claims as sacred', 'Invite Volkaria in to “protect” the faithful'],
+    objectives: ['Seize the DMZ it claims as sacred', 'Invite Volkaria in to “protect” the faithful', 'escalate the situation in hopes of getting Volkaria to enter in your defense'],
     support: 88, disposition: -45 },
 
   // --- Neutrals ---
@@ -69,9 +69,9 @@ export const FACTIONS: FactionDef[] = [
     redLines: ['Violation of its neutrality'], objectives: ['Stay neutral; extract concessions from both sides'],
     support: 55, disposition: 0 },
   { id: 'esquana', name: 'Esquana', type: 'neutral', alignment: 'neutral', color: '#cbd5e1',
-    doctrine: 'A neutral on the strait leaning quietly toward the Creed for trade reasons.',
-    redLines: ['Sanctions that threaten its economy'], objectives: ['Protect trade; avoid taking sides openly'],
-    support: 58, disposition: -15 },
+    doctrine: 'A wealthy religious monarchy that remains neutral because it distrusts Volkaria’s radicalism as much as it distrusts democratic pressure. It has a contested claim against Drovenia and wants either to seize the territory or keep Drovenia out of it.',
+    redLines: ['Drovenian control of the contested territory', 'Threats to the monarchy or holy institutions'], objectives: ['Protect royal neutrality', 'Seize the disputed territory or deny it to Drovenia'],
+    support: 58, disposition: 0 },
   { id: 'ndele', name: 'Ndele', type: 'neutral', alignment: 'neutral', color: '#d6d3d1',
     doctrine: 'A principled neutral in the south that values international law and may mediate.',
     redLines: ['Any use of force against civilians'], objectives: ['Mediate; uphold the rules-based order'],
@@ -250,10 +250,6 @@ const TILES: TileDef[] = [
   { q: 6,  r: 10, sea: true },
 ]
 
-function alignmentOf(id: FactionId | null, defs: Record<FactionId, FactionDef>): Alignment | null {
-  return id ? defs[id].alignment : null
-}
-
 export function buildInitialState(): GameState {
   const defs: Record<FactionId, FactionDef> = {}
   for (const f of FACTIONS) defs[f.id] = f
@@ -269,22 +265,6 @@ export function buildInitialState(): GameState {
       disputedBy: def.disputed,
       dmz: def.dmz ?? false,
       strait: def.strait ?? false,
-    }
-  }
-
-  // Mark border tiles contested wherever coalition and bloc territories touch.
-  const opposes = (a: Alignment | null, b: Alignment | null) =>
-    (a === 'coalition' && b === 'bloc') || (a === 'bloc' && b === 'coalition')
-  for (const t of Object.values(tiles)) {
-    if (!t.owner) continue
-    const mine = alignmentOf(t.owner, defs)
-    for (const nb of neighbors(t.hex)) {
-      const other = tiles[key(nb)]
-      if (!other?.owner) continue
-      if (opposes(mine, alignmentOf(other.owner, defs))) {
-        t.contested = true
-        break
-      }
     }
   }
 
@@ -477,15 +457,19 @@ export function buildInitialState(): GameState {
     turn: 1,
     order: FACTIONS.map((f) => f.id),
     turnIndex: 0,
-    escalation: 12,
     factions,
     tiles,
     installations,
     forces,
+    deathToll: 0,
+    factionDeaths: Object.fromEntries(FACTIONS.map((f) => [f.id, 0])),
     embargoes: [],
     embargoedBy: {},
+    ceasefires: [],
+    ceasefireRequests: [],
+    diplomaticMessages: [],
     log: [
-      { turn: 1, kind: 'system', text: 'Crisis begins. Radical Kazrek presses its religious claim to the demilitarized zone on your shores and masses an army group to march in and seize it.' },
+      { turn: 1, kind: 'system', text: 'Crisis begins. Radical Kazrek presses its religious claim to the demilitarized zone on Aurelias shores and masses an army group to march in and seize it.' },
       { turn: 1, kind: 'system', text: 'Backing Kazrek down is hard; doing nothing signals weakness. Aurelia moves first — step each nation through its turn with “End Turn”.' },
     ],
   }

@@ -17,7 +17,9 @@ export type Terrain = 'plains' | 'mountain' | 'sea' | 'island'
 export interface Tile {
   hex: Hex
   owner: FactionId | null
-  /** True when this tile borders a tile owned by a *different bloc* (cross-alignment frontier). */
+  /** Previous owner after a wartime claim; used for peace offers returning captured land. */
+  lastOwner?: FactionId | null
+  /** True when this tile is an authored disputed flashpoint. */
   contested: boolean
   /** Factions that politically claim this hex (a flashpoint). Distinct from owner. */
   disputedBy?: FactionId[]
@@ -64,6 +66,8 @@ export type ProcurementPolicy = 'civilian' | 'contracts' | 'emergency' | 'draft'
 export type ProcurementBurden = 'low' | 'standard' | 'high' | 'crisis'
 export type ProcurementProjectType = 'army_group' | 'missile_battery' | 'naval_group' | 'air_base' | 'naval_base'
 export type AidPackageType = 'economic' | 'arms'
+export type CeasefireResponse = 'accepted' | 'rejected'
+export type CeasefireRequestKind = 'ceasefire' | 'peace_offer' | 'mediation'
 
 export interface ProcurementProject {
   type: ProcurementProjectType
@@ -124,7 +128,7 @@ export interface Force {
   maxCharges?: number
 }
 
-export type EventKind = 'system' | 'player' | 'escalation' | 'dispatch'
+export type EventKind = 'system' | 'player' | 'dispatch'
 
 export interface GameEvent {
   turn: number
@@ -134,6 +138,37 @@ export interface GameEvent {
   text: string
 }
 
+export interface CeasefireRequest {
+  id: string
+  from: FactionId
+  to: FactionId
+  message: string
+  turn: number
+  kind?: CeasefireRequestKind
+  /** For mediation, the other side this proposal would bind if accepted. */
+  counterpartId?: FactionId
+  terms?: PeaceTerm[]
+}
+
+export interface PeaceTerm {
+  type: 'return_land'
+  hex: Hex
+  from: FactionId
+  to: FactionId
+}
+
+export interface DiplomaticMessage {
+  id: string
+  from: FactionId
+  to: FactionId
+  message: string
+  turn: number
+  kind: 'message' | 'ceasefire_request' | 'ceasefire_response' | 'peace_offer' | 'mediation_offer'
+  response?: CeasefireResponse
+  counterpartId?: FactionId
+  terms?: PeaceTerm[]
+}
+
 export interface GameState {
   /** Round number. Increments after every faction has taken its turn. */
   turn: number
@@ -141,16 +176,24 @@ export interface GameState {
   order: FactionId[]
   /** Index into `order` — whose turn it currently is. */
   turnIndex: number
-  /** 0 (calm) .. 100 (catastrophe). The spine of the game. */
-  escalation: number
   factions: Record<FactionId, Faction>
   tiles: Record<HexKey, Tile>
   installations: Installation[]
   forces: Force[]
+  /** Estimated deaths caused by the crisis across all factions. */
+  deathToll: number
+  /** Estimated deaths suffered by each faction's people and forces. */
+  factionDeaths: Record<FactionId, number>
   /** Severed trade links, each a sorted "a|b" faction-pair key. Absent = trading. */
   embargoes: string[]
   /** Which faction imposed each embargo. Only that faction can restore the link. */
   embargoedBy: Record<string, FactionId>
+  /** Active bilateral ceasefire pairs, each a sorted "a|b" faction-pair key. */
+  ceasefires: string[]
+  /** Ceasefire proposals waiting for the target faction to answer. */
+  ceasefireRequests: CeasefireRequest[]
+  /** Diplomatic notes and ceasefire exchanges visible to agents and the player. */
+  diplomaticMessages: DiplomaticMessage[]
   log: GameEvent[]
   /** Set when a government's support collapses — the game is over. */
   regimeFallen?: FactionId

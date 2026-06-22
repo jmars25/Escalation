@@ -100,6 +100,17 @@ h2 {
 
 .row-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .turn { font-size: 13px; color: var(--muted); }
+.death-toll {
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.death-toll span { display: flex; justify-content: space-between; gap: 10px; }
+.death-toll strong { color: #fca5a5; }
 
 .meter-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
 .meter { height: 10px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
@@ -141,6 +152,48 @@ button.full { width: 100%; margin-top: 8px; }
 .aid-row { display: grid; grid-template-columns: 1fr auto auto; gap: 5px; align-items: center; font-size: 11px; }
 .aid-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aid-row button { min-height: 22px; }
+
+.diplomacy-panel { display: flex; flex-direction: column; gap: 8px; }
+.diplomacy-panel select,
+.diplomacy-panel textarea {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 11px;
+  padding: 7px;
+}
+.diplomacy-panel textarea {
+  resize: vertical;
+  min-height: 58px;
+  line-height: 1.35;
+}
+.ceasefire-inbox { display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.ceasefire-request {
+  background: #111827;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  padding: 8px;
+}
+.ceasefire-request strong { display: block; color: #fecaca; font-size: 11px; margin-bottom: 4px; }
+.ceasefire-request p { margin: 0 0 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.mediation-box {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mediation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+.mediation-box button.full {
+  margin-top: 0;
+}
 
 .gameover { border: 1px solid #ef4444; }
 .gameover h2 { color: #ef4444; }
@@ -211,6 +264,28 @@ button.ghost {
 .fname { flex: 1; }
 .ftype { color: var(--muted); font-size: 11px; }
 .dispo { font-variant-numeric: tabular-nums; font-size: 12px; width: 34px; text-align: right; }
+
+.diplomacy-log {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.diplo-line {
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+  border-left: 2px solid var(--border);
+  padding-left: 7px;
+}
+.diplo-line strong { color: var(--text); font-size: 11px; }
+.diplo-line.active,
+.diplo-line.accepted { border-left-color: #22c55e; }
+.diplo-line.rejected { border-left-color: #ef4444; }
 
 .log-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .log { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }

@@ -99,10 +99,10 @@ Holding your coalition together is as important as deterring the Rival.
 
 ## 4. Core systems
 
-### 4.1 Hex map (procedural)
-- Code-generated hex grid (axial coordinates). No drawn art.
-- Each hex has an owner (or is **contested** = on a border between factions), plus simple
-  terrain affecting movement/posture.
+### 4.1 Hex map
+- Authored hex grid (axial coordinates). No drawn art.
+- Each hex has an owner, plus simple terrain affecting movement/posture.
+- Contested hexes are explicit disputed flashpoints, not every faction border.
 - Rendered as SVG polygons; fill = owner color, hatch pattern = contested.
 - The map is a *board*, not a simulation. It exists to give moves spatial meaning.
 

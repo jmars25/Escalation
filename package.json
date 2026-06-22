@@ -6,19 +6,28 @@
   "description": "Turn-based geopolitical crisis war-game driven by LLM agents (Phase 1: playable skeleton, stub AI).",
   "scripts": {
     "dev": "vite",
+    "server": "tsx --env-file=.env server/index.ts",
+    "server:dev": "tsx watch --env-file=.env server/index.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "openai": "^6.44.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.22.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }

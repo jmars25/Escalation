@@ -27,6 +27,8 @@ export function InfoPanel() {
   const pendingTrade = useGameStore((s) => s.pendingTrade)
   const currentId = game.order[game.turnIndex]
   const currentName = game.factions[currentId].name
+  const diplomaticMessages = game.diplomaticMessages ?? []
+  const ceasefires = game.ceasefires ?? []
 
   const tile = inspectHex ? game.tiles[key(inspectHex)] : undefined
   const tileInstalls = inspectHex ? game.installations.filter((i) => key(i.hex) === key(inspectHex)) : []
@@ -110,6 +112,22 @@ export function InfoPanel() {
           </div>
         ))}
       </div>
+
+      {(ceasefires.length > 0 || diplomaticMessages.length > 0) && (
+        <div className="panel diplomacy-log">
+          <h2>Diplomacy</h2>
+          {ceasefires.map((pair) => {
+            const [a, b] = pair.split('|')
+            return <div key={pair} className="diplo-line active">Ceasefire: {game.factions[a]?.name ?? a} - {game.factions[b]?.name ?? b}</div>
+          })}
+          {diplomaticMessages.slice(0, 8).map((msg) => (
+            <div key={msg.id} className={`diplo-line ${msg.response ?? msg.kind}`}>
+              <strong>{game.factions[msg.from]?.name ?? msg.from} {'->'} {game.factions[msg.to]?.name ?? msg.to}</strong>
+              <span>{msg.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="panel log-panel">
         <h2>Dispatches</h2>

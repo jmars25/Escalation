@@ -3,10 +3,10 @@ import { persist } from 'zustand/middleware'
 import type { AidPackageType, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 import { buildInitialState } from '../game/scenario'
 import {
-  airBaseTargets, airStrike, canClaim, canStrike, claimHex, currentFactionId, endFactionTurn,
-  embargoOwner, forceStrike, forcesAt, isEmbargoed, legalMoves, moveForce, sendAidPackage, setProcurementBurden,
-  setProcurementPolicy, startProcurement, strikeTargets, toggleEmbargo,
-  type StrikeIntensity, type StrikeKind,
+  airBaseTargets, airStrike, canClaim, canStrike, claimHex, currentFactionId, dispatch, endFactionTurn,
+  embargoOwner, forceStrike, forcesAt, isEmbargoed, legalMoves, moveForce, respondCeasefire, sendAidPackage,
+  sendDiplomaticMessage, setProcurementBurden, setProcurementPolicy, startProcurement, strikeTargets, toggleEmbargo,
+  type Action, type StrikeIntensity, type StrikeKind,
 } from '../game/engine'
 import { hexEquals, key } from '../game/hexUtils'
 import { sfx } from '../audio/sfx'
@@ -47,11 +47,17 @@ interface GameStore {
   setProcurementBurden: (burden: ProcurementBurden) => void
   startProcurement: (type: ProcurementProjectType) => void
   sendAidPackage: (targetId: string, type: AidPackageType) => void
+  sendDiplomaticMessage: (targetId: string, message: string) => void
+  mediatePeace: (sideAId: string, sideBId: string, message: string) => Promise<void>
+  requestCeasefire: (targetId: string, message: string) => Promise<void>
+  respondCeasefire: (requestId: string, accepted: boolean, message: string) => void
   enterStrike: (intensity: StrikeIntensity) => void
   enterAirStrike: (intensity: StrikeIntensity) => void
   cancelAction: () => void
   endTurn: () => void
   reset: () => void
+  aiPending: boolean
+  runAiTurn: () => Promise<void>
 }
 
 function selectFx(game: GameState, forceId: string | null) {
@@ -129,7 +135,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   clickHex: (h) => {
     const { game, selectedForceId, mode, strikeIntensity, moveTargets, strikeTargets: tgts } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || get().aiPending) return
 
     // Strike modes: click a target to resolve, anything else cancels.
     if (mode === 'strike' || mode === 'airstrike') {
@@ -159,13 +165,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       return
     }
 
-    // Move mode: select/cycle your forces here, or move the selected one.
-    const mine = forcesAt(game, h).filter((f) => f.owner === currentFactionId(game))
-    if (mine.length) {
-      const idx = mine.findIndex((f) => f.id === selectedForceId)
-      get().selectForce(mine[(idx + 1) % mine.length].id)
-      return
-    }
+    // Move mode: move the selected force first, so friendly stacks don't steal the click.
     if (selectedForceId && moveTargets.some((t) => hexEquals(t, h))) {
       const myAlign = game.factions[currentFactionId(game)].alignment
       const force = game.forces.find((f) => f.id === selectedForceId)
@@ -185,6 +185,12 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
         moveTargets: moved ? legalMoves(result, moved) : [],
         lastAttack: armyAttack && result !== game ? { from, to: h, key: Date.now(), forceId: selectedForceId, won } : get().lastAttack,
       })
+      return
+    }
+    const mine = forcesAt(game, h).filter((f) => f.owner === currentFactionId(game))
+    if (mine.length) {
+      const idx = mine.findIndex((f) => f.id === selectedForceId)
+      get().selectForce(mine[(idx + 1) % mine.length].id)
       return
     }
     // Clicked empty/enemy ground — inspect what's on it.
@@ -248,6 +254,64 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     set({ game: result })
   },
 
+  sendDiplomaticMessage: (targetId, message) => {
+    const { game } = get()
+    if (game.regimeFallen || get().aiPending) return
+    const result = sendDiplomaticMessage(game, currentFactionId(game), targetId, message)
+    if (result !== game) sfx.confirm()
+    set({ game: result })
+  },
+
+  mediatePeace: async (sideAId, sideBId, message) => {
+    const { game } = get()
+    if (game.regimeFallen || get().aiPending) return
+    set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
+    try {
+      const res = await fetch('http://localhost:3001/api/mediation-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: game, mediatorId: currentFactionId(game), sideAId, sideBId, message }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { finalState } = await res.json() as { finalState: typeof game }
+      sfx.confirm()
+      set({ game: finalState, pendingTrade: {} })
+    } catch (err) {
+      console.error('[mediatePeace]', err)
+    } finally {
+      set({ aiPending: false })
+    }
+  },
+
+  requestCeasefire: async (targetId, message) => {
+    const { game } = get()
+    if (game.regimeFallen || get().aiPending) return
+    set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
+    try {
+      const res = await fetch('http://localhost:3001/api/ceasefire-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { finalState } = await res.json() as { finalState: typeof game; response: 'accepted' | 'rejected'; message: string }
+      sfx.confirm()
+      set({ game: finalState, pendingTrade: {} })
+    } catch (err) {
+      console.error('[requestCeasefire]', err)
+    } finally {
+      set({ aiPending: false })
+    }
+  },
+
+  respondCeasefire: (requestId, accepted, message) => {
+    const { game } = get()
+    if (game.regimeFallen || get().aiPending) return
+    const result = respondCeasefire(game, currentFactionId(game), requestId, accepted ? 'accepted' : 'rejected', message)
+    if (result !== game) sfx.confirm()
+    set({ game: result })
+  },
+
   enterStrike: (intensity) => {
     const { game, selectedForceId } = get()
     const force = game.forces.find((f) => f.id === selectedForceId)
@@ -278,12 +342,80 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       if (desired !== isEmbargoed(g, cur, target)) g = toggleEmbargo(g, cur, target)
     }
     const next = endFactionTurn(g)
-    sfx.endTurn(next.escalation)
-    if (next.escalation >= 90 && g.escalation < 90) sfx.alert()
+    sfx.endTurn()
     set({ game: next, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], pendingTrade: {} })
   },
 
   reset: () => set({ game: buildInitialState(), introPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], lastStrike: null, lastAttack: null, pendingTrade: {} }),
+
+  aiPending: false,
+
+  runAiTurn: async () => {
+    const { game } = get()
+    if (get().aiPending) return
+    set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
+    try {
+      const res = await fetch('http://localhost:3001/api/agent-turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: game, factionId: currentFactionId(game) }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { actions, finalState } = await res.json() as { actions: Action[]; finalState: typeof game; log: string[]; pressStatement?: string }
+
+      // Replay actions to collect all animation events in order.
+      type AnimEvent = { type: 'attack'; fx: AttackFx } | { type: 'strike'; fx: StrikeFx }
+      const events: AnimEvent[] = []
+      let replay = game
+
+      for (const action of actions) {
+        if (action.type === 'move_force') {
+          const force = replay.forces.find((f) => f.id === action.forceId)
+          if (force) {
+            const myAlign = replay.factions[force.owner].alignment
+            const tile = replay.tiles[key(action.to)]
+            const isAttack =
+              forcesAt(replay, action.to).some((f) => replay.factions[f.owner].alignment !== myAlign) ||
+              tile?.owner !== force.owner || !!tile?.disputedBy || !!tile?.dmz
+            if (isAttack) {
+              const from = force.hex
+              replay = dispatch(replay, action)
+              const moved = replay.forces.find((f) => f.id === action.forceId)
+              events.push({ type: 'attack', fx: { from, to: action.to, key: Date.now(), forceId: action.forceId, won: !!moved && hexEquals(moved.hex, action.to) } })
+              continue
+            }
+          }
+        } else if (action.type === 'force_strike' || action.type === 'air_strike') {
+          const from = action.type === 'force_strike'
+            ? (replay.forces.find((f) => f.id === action.forceId)?.hex ?? action.target)
+            : (replay.installations.find((i) => i.id === action.baseId)?.hex ?? action.target)
+          const kind: StrikeKind = action.type === 'air_strike' ? 'air'
+            : replay.forces.find((f) => f.id === action.forceId)?.type === 'naval_group' ? 'naval' : 'missile'
+          events.push({ type: 'strike', fx: { from, to: action.target, key: Date.now(), kind } })
+        }
+        replay = dispatch(replay, action)
+      }
+
+      // Apply final state, then play animations sequentially.
+      sfx.endTurn()
+      set({ game: finalState, pendingTrade: {} })
+
+      const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+      for (const ev of events) {
+        if (ev.type === 'attack') {
+          set({ lastAttack: { ...ev.fx, key: Date.now() } })
+          await sleep(960)
+        } else {
+          set({ lastStrike: { ...ev.fx, key: Date.now() } })
+          await sleep(ev.fx.kind === 'air' ? 860 : 780)
+        }
+      }
+    } catch (err) {
+      console.error('[runAiTurn]', err)
+    } finally {
+      set({ aiPending: false })
+    }
+  },
 }), {
   name: 'escalation-save',
   partialize: (s) => ({ game: s.game, pendingTrade: s.pendingTrade, introPending: s.introPending }),

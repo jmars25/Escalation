@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="760" viewBox="0 0 1250 760">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/>
+    </marker>
+    <style>
+      .bg { fill: #ffffff; }
+      .box { fill: #eef6ff; stroke: #2563eb; stroke-width: 2; rx: 8; }
+      .engine { fill: #ecfdf5; stroke: #059669; stroke-width: 2; rx: 8; }
+      .safety { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; rx: 8; }
+      .title { font: 700 18px Arial, sans-serif; fill: #111827; }
+      .body { font: 14px Arial, sans-serif; fill: #1f2937; }
+      .small { font: 12px Arial, sans-serif; fill: #374151; }
+      .label { font: 13px Arial, sans-serif; fill: #111827; }
+      .arrow { stroke: #111827; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .return { stroke: #4b5563; stroke-width: 2; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .note { fill: #fef3c7; stroke: #d97706; stroke-width: 1.5; rx: 8; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1250" height="760"/>
+  <text class="title" x="40" y="42">Escalation LLM Harness Flow</text>
+  <text class="body" x="40" y="68">The model requests actions. The harness validates them. The game engine remains the authority.</text>
+
+  <rect class="box" x="45" y="115" width="175" height="92"/>
+  <text class="title" x="68" y="145">UI</text>
+  <text class="body" x="68" y="169">useGameStore.ts</text>
+  <text class="small" x="68" y="190">AI: Take Turn</text>
+
+  <rect class="box" x="285" y="115" width="175" height="92"/>
+  <text class="title" x="308" y="145">API</text>
+  <text class="body" x="308" y="169">server/index.ts</text>
+  <text class="small" x="308" y="190">POST /api/agent-turn</text>
+
+  <rect class="box" x="525" y="115" width="175" height="92"/>
+  <text class="title" x="548" y="145">Harness</text>
+  <text class="body" x="548" y="169">agent/harness.ts</text>
+  <text class="small" x="548" y="190">turn loop</text>
+
+  <rect class="box" x="765" y="115" width="175" height="92"/>
+  <text class="title" x="788" y="145">Provider</text>
+  <text class="body" x="788" y="169">agent/provider.ts</text>
+  <text class="small" x="788" y="190">OpenAI / Anthropic</text>
+
+  <rect class="box" x="1005" y="115" width="175" height="92"/>
+  <text class="title" x="1028" y="145">LLM</text>
+  <text class="body" x="1028" y="169">model call</text>
+  <text class="small" x="1028" y="190">tool requests</text>
+
+  <line class="arrow" x1="220" y1="161" x2="285" y2="161"/>
+  <text class="label" x="231" y="151">state + faction</text>
+  <line class="arrow" x1="460" y1="161" x2="525" y2="161"/>
+  <text class="label" x="474" y="151">runAgentTurn</text>
+  <line class="arrow" x1="700" y1="161" x2="765" y2="161"/>
+  <text class="label" x="715" y="151">nextTurn</text>
+  <line class="arrow" x1="940" y1="161" x2="1005" y2="161"/>
+  <text class="label" x="955" y="151">prompt + tools</text>
+
+  <rect class="box" x="405" y="300" width="230" height="108"/>
+  <text class="title" x="428" y="330">Agent Definition</text>
+  <text class="body" x="428" y="354">agent/factionAgent.ts</text>
+  <text class="small" x="428" y="376">buildSystemPrompt</text>
+  <text class="small" x="428" y="394">tool schemas</text>
+
+  <rect class="safety" x="735" y="300" width="230" height="108"/>
+  <text class="title" x="758" y="330">Game Tool Executor</text>
+  <text class="body" x="758" y="354">agent/gameTools.ts</text>
+  <text class="small" x="758" y="376">parse tool call</text>
+  <text class="small" x="758" y="394">validate before dispatch</text>
+
+  <rect class="engine" x="525" y="525" width="230" height="108"/>
+  <text class="title" x="548" y="555">Game Engine</text>
+  <text class="body" x="548" y="579">src/game/engine.ts</text>
+  <text class="small" x="548" y="601">availableActions</text>
+  <text class="small" x="548" y="619">dispatch</text>
+
+  <path class="arrow" d="M 612 207 C 612 240, 520 250, 520 300"/>
+  <text class="label" x="532" y="260">build prompt</text>
+
+  <path class="return" d="M 635 354 C 690 354, 690 220, 765 190"/>
+  <text class="label" x="666" y="310">system prompt</text>
+
+  <path class="return" d="M 1005 190 C 942 252, 915 250, 880 300"/>
+  <text class="label" x="930" y="260">tool calls</text>
+
+  <path class="arrow" d="M 735 360 C 650 395, 640 470, 640 525"/>
+  <text class="label" x="658" y="460">availableActions</text>
+
+  <path class="arrow" d="M 755 579 C 835 540, 850 465, 850 408"/>
+  <text class="label" x="800" y="515">legal action only</text>
+
+  <path class="return" d="M 735 330 C 675 310, 650 230, 640 207"/>
+  <text class="label" x="652" y="282">tool result</text>
+
+  <path class="return" d="M 525 185 C 422 238, 372 238, 372 207"/>
+  <text class="label" x="418" y="245">actions + finalState + log</text>
+
+  <path class="return" d="M 285 185 C 205 245, 132 245, 132 207"/>
+  <text class="label" x="82" y="267">apply final state</text>
+
+  <rect class="note" x="45" y="675" width="1160" height="48"/>
+  <text class="body" x="68" y="705">Key rule: the LLM never mutates game state directly. It asks for tools; gameTools.ts checks legality; engine.ts applies legal state changes.</text>
+</svg>
