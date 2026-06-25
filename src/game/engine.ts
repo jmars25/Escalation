@@ -188,7 +188,7 @@ function isNavalAssaultTarget(s: GameState, force: Force, h: Hex): boolean {
 /** Legal actions for a force: deploy anywhere reachable, or for armies/navies,
  *  assault adjacent contested ground. Both consume the force's turn. */
 export function legalMoves(s: GameState, force: Force): Hex[] {
-  if (force.acted) return []
+  if (force.acted || s.factions[force.owner]?.exiled) return []
   const out = new Map<string, Hex>()
   for (const t of Object.values(s.tiles)) {
     if (isDeployTarget(s, force, t.hex)) out.set(key(t.hex), t.hex)
@@ -245,6 +245,7 @@ function claimOccupiedHex(s: GameState, force: Force): boolean {
   t.dmz = false
   t.disputedBy = undefined
   t.contested = true
+  transferCitiesOnHex(s, force.hex, force.owner, prevOwner)
   if (prevOwner) s.factions[prevOwner].disposition = clamp(s.factions[prevOwner].disposition - 10, -100, 100)
   force.acted = true
   if (!wasDmz && wasDisputed) {
@@ -272,7 +273,7 @@ function claimOccupiedHex(s: GameState, force: Force): boolean {
 export function resolveAssault(state: GameState, attackerId: string, to: Hex): GameState {
   const s = clone(state)
   const atk = s.forces.find((f) => f.id === attackerId)
-  if (!atk || atk.type !== 'army_group' || atk.acted) return state
+  if (!atk || atk.type !== 'army_group' || atk.acted || s.factions[atk.owner]?.exiled) return state
   if (!isArmyAttackTarget(s, atk, to)) return state
   const mine = s.factions[atk.owner].alignment
   const defs = tileDefenders(s, to, mine, atk.owner)
@@ -335,7 +336,7 @@ export function resolveAssault(state: GameState, attackerId: string, to: Hex): G
 export function resolveNavalAssault(state: GameState, attackerId: string, to: Hex): GameState {
   const s = clone(state)
   const atk = s.forces.find((f) => f.id === attackerId)
-  if (!atk || atk.type !== 'naval_group' || atk.acted) return state
+  if (!atk || atk.type !== 'naval_group' || atk.acted || s.factions[atk.owner]?.exiled) return state
   if (!isNavalAssaultTarget(s, atk, to)) return state
   const mine = s.factions[atk.owner].alignment
   const defs = tileDefenders(s, to, mine, atk.owner)
@@ -397,7 +398,7 @@ export function resolveNavalAssault(state: GameState, attackerId: string, to: He
 export function moveForce(state: GameState, forceId: string, to: Hex): GameState {
   const s = clone(state)
   const force = s.forces.find((f) => f.id === forceId)
-  if (!force) return state
+  if (!force || s.factions[force.owner]?.exiled) return state
   if (ceasefireBlocksEntry(s, force, to)) return state
   const deploying = isDeployTarget(s, force, to)
   const attacking = isArmyAttackTarget(s, force, to)
@@ -462,7 +463,7 @@ const forceNoun = (t: Force['type']) => LABEL[t].replace(/^an? /, '')
 /** Only army groups occupy/claim, on a plains tile that isn't yours — and only once
  *  any opposing army group defending the tile has been destroyed. */
 export function canClaim(s: GameState, force: Force): boolean {
-  if (force.acted) return false
+  if (force.acted || s.factions[force.owner]?.exiled) return false
   const t = s.tiles[key(force.hex)]
   if (!t || t.owner === force.owner) return false
   if (t.owner && hasCeasefire(s, force.owner, t.owner)) return false
@@ -491,6 +492,7 @@ export function claimHex(state: GameState, forceId: string): GameState {
   t.dmz = false
   t.disputedBy = undefined
   t.contested = true
+  transferCitiesOnHex(s, force.hex, force.owner, prevOwner)
   if (prevOwner) s.factions[prevOwner].disposition = clamp(s.factions[prevOwner].disposition - 10, -100, 100)
   force.acted = true
   if (!wasDmz && wasDisputed) {
@@ -555,14 +557,14 @@ function enemiesInRange(s: GameState, factionId: string, from: Hex, range: numbe
 }
 
 export function strikeTargets(s: GameState, force: Force): Hex[] {
-  if (!canStrike(force)) return []
+  if (!canStrike(force) || s.factions[force.owner]?.exiled) return []
   return enemiesInRange(s, force.owner, force.hex, STRIKE_RANGE[kindOf(force)])
 }
 
 /** Hexes a specific air base can reach (empty if it has no sorties). */
 export function airBaseTargets(s: GameState, baseId: string): Hex[] {
   const base = s.installations.find((i) => i.id === baseId)
-  if (!base || base.type !== 'air_base' || (base.charges ?? 0) < 1) return []
+  if (!base || base.type !== 'air_base' || (base.charges ?? 0) < 1 || s.factions[base.owner]?.exiled) return []
   return enemiesInRange(s, base.owner, base.hex, STRIKE_RANGE.air)
 }
 
@@ -664,7 +666,7 @@ export function projectCost(type: ProcurementProjectType): number {
 export function setProcurementPolicy(state: GameState, factionId: string, policy: ProcurementPolicy): GameState {
   const s = clone(state)
   const f = s.factions[factionId]
-  if (!f || f.procurement.policy === policy) return state
+  if (!f || f.exiled || f.procurement.policy === policy) return state
   f.procurement.policy = policy
   if (policy === 'draft') {
     f.support = clamp(f.support - 10)
@@ -686,7 +688,7 @@ export function setProcurementPolicy(state: GameState, factionId: string, policy
 export function setProcurementBurden(state: GameState, factionId: string, burden: ProcurementBurden): GameState {
   const s = clone(state)
   const f = s.factions[factionId]
-  if (!f || f.procurement.burden === burden) return state
+  if (!f || f.exiled || f.procurement.burden === burden) return state
   f.procurement.burden = burden
   log(s, { kind: 'dispatch', faction: factionId, text: `${f.name} sets procurement burden to ${burden}.` })
   return s
@@ -695,7 +697,7 @@ export function setProcurementBurden(state: GameState, factionId: string, burden
 export function startProcurement(state: GameState, factionId: string, type: ProcurementProjectType): GameState {
   const s = clone(state)
   const f = s.factions[factionId]
-  if (!f) return state
+  if (!f || f.exiled) return state
   const current = f.procurement.project
   if (current?.type === type) return state
   f.procurement.project = { type, progress: current ? Math.min(current.progress, PROJECT_COST[type] - 1) : 0 }
@@ -708,7 +710,7 @@ export function sendAidPackage(state: GameState, fromId: string, toId: string, t
   const s = clone(state)
   const from = s.factions[fromId]
   const to = s.factions[toId]
-  if (!from || !to || from.alignment === 'neutral' || from.alignment !== to.alignment) return state
+  if (!from || !to || from.exiled || from.alignment === 'neutral' || from.alignment !== to.alignment) return state
 
   if (type === 'economic') {
     from.market = clamp(from.market - 6)
@@ -869,12 +871,66 @@ function recomputeMarket(s: GameState, id: string) {
   s.factions[id].market = Math.round(100 * cityFactor * tradeFactor)
 }
 
+function hasOwnedCity(s: GameState, id: string): boolean {
+  return s.installations.some((i) => i.type === 'city' && i.owner === id)
+}
+
+function refreshGovernmentExile(s: GameState, id: string | null | undefined) {
+  if (!id) return
+  const faction = s.factions[id]
+  if (!faction) return
+  const controlsCity = hasOwnedCity(s, id)
+  if (!controlsCity && !faction.exiled) {
+    faction.exiled = true
+    faction.exiledTurn = s.turn
+    faction.procurement.project = undefined
+    faction.procurement.aidBoost = 0
+    faction.procurement.aidBoostTurns = 0
+    log(s, {
+      kind: 'system',
+      faction: id,
+      text: `${faction.name}'s government goes into exile after losing control of every city. It can issue statements and pursue diplomacy, but no longer commands national military or procurement actions.`,
+    })
+  } else if (controlsCity && faction.exiled) {
+    faction.exiled = false
+    faction.exiledTurn = undefined
+    log(s, {
+      kind: 'dispatch',
+      faction: id,
+      text: `${faction.name}'s government returns from exile after regaining a city.`,
+    })
+  }
+}
+
+function transferCitiesOnHex(s: GameState, hex: Hex, newOwner: string, prevOwner?: string | null) {
+  let transferred = false
+  for (const city of s.installations) {
+    if (city.type !== 'city' || !hexEquals(city.hex, hex) || city.owner === newOwner) continue
+    const oldOwner = city.owner
+    city.owner = newOwner
+    transferred = true
+    log(s, {
+      kind: 'system',
+      faction: newOwner,
+      text: `${s.factions[newOwner]?.name ?? newOwner} occupies ${s.factions[oldOwner]?.name ?? oldOwner}'s city at (${hex.q},${hex.r}).`,
+    })
+    recomputeMarket(s, oldOwner)
+    refreshGovernmentExile(s, oldOwner)
+  }
+  if (transferred) {
+    recomputeMarket(s, newOwner)
+    refreshGovernmentExile(s, newOwner)
+  }
+  if (prevOwner && prevOwner !== newOwner) refreshGovernmentExile(s, prevOwner)
+}
+
 /** Cut or restore the (a,b) trade link. Both economies recompute; the hit to each
  *  is proportional to the *other's* size. A nation only controls its own links —
  *  a bloc-wide embargo requires convincing every nation independently. */
 export function toggleEmbargo(state: GameState, a: string, b: string): GameState {
   if (a === b) return state
   const s = clone(state)
+  if (s.factions[a]?.exiled) return state
   const k = pairKey(a, b)
   const idx = s.embargoes.indexOf(k)
   const cutting = idx === -1
@@ -947,6 +1003,7 @@ function applyPeaceTerms(s: GameState, terms: PeaceTerm[] = []) {
     tile.owner = term.to
     tile.lastOwner = term.from
     tile.contested = true
+    transferCitiesOnHex(s, term.hex, term.to, term.from)
     log(s, {
       kind: 'dispatch',
       faction: term.from,
@@ -1063,6 +1120,7 @@ export function respondCeasefire(
   ensureDiplomacy(s)
   const request = s.ceasefireRequests.find((item) => item.id === requestId && item.to === responderId)
   if (!request) return state
+  if (request.kind === 'mediation') return state
   const responder = s.factions[responderId]
   const requester = s.factions[request.from]
   if (!responder || !requester) return state
@@ -1076,27 +1134,25 @@ export function respondCeasefire(
     if (!s.ceasefires.includes(k)) s.ceasefires.push(k)
     applyPeaceTerms(s, request.terms)
   }
-  const responseTo = request.kind === 'mediation' ? (request.counterpartId ?? request.from) : request.from
   s.diplomaticMessages.unshift({
     id: nextDiplomacyId(s, 'm'),
     from: responderId,
-    to: responseTo,
+    to: request.from,
     message: text,
     turn: s.turn,
     kind: 'ceasefire_response',
     response,
   })
   s.diplomaticMessages = s.diplomaticMessages.slice(0, 80)
-  const subject =
-    request.kind === 'mediation'
-      ? `${requester.name}'s mediated peace proposal`
-      : request.kind === 'peace_offer'
-        ? `${requester.name}'s peace offer`
-        : `${requester.name}'s ceasefire request`
+  const subject = request.kind === 'peace_offer'
+    ? `${requester.name}'s peace offer`
+    : `${requester.name}'s ceasefire request`
   log(s, {
     kind: 'dispatch',
     faction: responderId,
-    text: `${responder.name} ${response === 'accepted' ? 'accepts' : 'rejects'} ${subject}: "${text}"`,
+    text: response === 'accepted'
+      ? `${responder.name} accepts ${subject}; both governments enter a bilateral ceasefire: "${text}"`
+      : `${responder.name} rejects ${subject}: "${text}"`,
   })
   return s
 }
@@ -1244,7 +1300,7 @@ function applyStrike(s: GameState, atkId: string, target: Hex, kind: StrikeKind,
 export function forceStrike(state: GameState, forceId: string, target: Hex, intensity: StrikeIntensity): GameState {
   const s = clone(state)
   const force = s.forces.find((f) => f.id === forceId)
-  if (!force || !canStrike(force) || (force.charges ?? 0) < chargeCost(intensity)) return state
+  if (!force || s.factions[force.owner]?.exiled || !canStrike(force) || (force.charges ?? 0) < chargeCost(intensity)) return state
   if (!strikeTargets(s, force).some((h) => hexEquals(h, target))) return state
   applyStrike(s, force.owner, target, kindOf(force), intensity)
   force.charges = (force.charges ?? 0) - chargeCost(intensity)
@@ -1257,7 +1313,7 @@ export function forceStrike(state: GameState, forceId: string, target: Hex, inte
 export function airStrike(state: GameState, baseId: string, target: Hex, intensity: StrikeIntensity): GameState {
   const s = clone(state)
   const base = s.installations.find((i) => i.id === baseId)
-  if (!base || base.type !== 'air_base') return state
+  if (!base || base.type !== 'air_base' || s.factions[base.owner]?.exiled) return state
   const cost = chargeCost(intensity)
   if ((base.charges ?? 0) < cost) return state
   if (!airBaseTargets(s, baseId).some((h) => hexEquals(h, target))) return state
@@ -1293,9 +1349,13 @@ export function endFactionTurn(state: GameState): GameState {
     log(s, { kind: 'system', text: `Round ${s.turn} begins.` })
   }
   const next = s.factions[currentFactionId(s)]
-  restock(s, next.id) // resupply the incoming faction's strike platforms
-  processProcurement(s, next.id)
-  log(s, { kind: 'system', faction: next.id, text: `${next.name}'s turn.` })
+  if (next.exiled) {
+    log(s, { kind: 'system', faction: next.id, text: `${next.name}'s government-in-exile turn.` })
+  } else {
+    restock(s, next.id) // resupply the incoming faction's strike platforms
+    processProcurement(s, next.id)
+    log(s, { kind: 'system', faction: next.id, text: `${next.name}'s turn.` })
+  }
   return s
 }
 
@@ -1324,6 +1384,40 @@ export type Action =
   | { type: 'respond_ceasefire';      requestId: string; response: CeasefireResponse; message: string }
   | { type: 'end_turn' }
 
+function exileActions(state: GameState, factionId: string): Action[] {
+  const actions: Action[] = []
+  const factions = Object.values(state.factions)
+  for (const other of factions) {
+    if (other.id === factionId) continue
+    actions.push({ type: 'send_message', targetId: other.id, message: '' })
+    if (!hasCeasefire(state, factionId, other.id) && !hasOpenPeaceRequest(state, factionId, other.id)) {
+      actions.push({ type: 'propose_ceasefire', targetId: other.id, message: '' })
+      actions.push({ type: 'propose_peace', targetId: other.id, message: '', returnHexes: [] })
+    }
+  }
+  for (const sideA of factions) {
+    if (sideA.id === factionId) continue
+    for (const sideB of factions) {
+      if (sideB.id === factionId || sideB.id === sideA.id || hasCeasefire(state, sideA.id, sideB.id)) continue
+      if (hasOpenPeaceRequest(state, factionId, sideA.id, sideB.id)) continue
+      actions.push({ type: 'mediate_peace', sideAId: sideA.id, sideBId: sideB.id, message: '', returnHexes: [] })
+    }
+  }
+  actions.push({ type: 'end_turn' })
+  return actions
+}
+
+function isExileAction(action: Action): boolean {
+  return (
+    action.type === 'send_message' ||
+    action.type === 'propose_ceasefire' ||
+    action.type === 'propose_peace' ||
+    action.type === 'mediate_peace' ||
+    action.type === 'respond_ceasefire' ||
+    action.type === 'end_turn'
+  )
+}
+
 /** Every action the current faction can legally take right now.
  *  Returns a flat, serializable list suitable for LLM tool-call enumeration. */
 export function availableActions(state: GameState): Action[] {
@@ -1339,6 +1433,7 @@ export function availableActions(state: GameState): Action[] {
     }
     return actions
   }
+  if (faction.exiled) return exileActions(state, factionId)
   // --- Forces ---
   for (const force of state.forces) {
     if (force.owner !== factionId || force.acted) continue
@@ -1420,6 +1515,7 @@ export function availableActions(state: GameState): Action[] {
 export function dispatch(state: GameState, action: Action): GameState {
   if (state.regimeFallen && action.type !== 'end_turn') return state
   const factionId = currentFactionId(state)
+  if (state.factions[factionId]?.exiled && !isExileAction(action)) return state
   switch (action.type) {
     case 'move_force':             return moveForce(state, action.forceId, action.to)
     case 'claim_hex':              return claimHex(state, action.forceId)

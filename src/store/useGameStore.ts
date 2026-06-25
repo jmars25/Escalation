@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AidPackageType, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
+import type { AidPackageType, CeasefireRequest, Force, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 import { buildInitialState } from '../game/scenario'
 import {
   airBaseTargets, airStrike, canClaim, canStrike, claimHex, currentFactionId, dispatch, endFactionTurn,
-  embargoOwner, forceStrike, forcesAt, isEmbargoed, legalMoves, moveForce, respondCeasefire, sendAidPackage,
+  embargoOwner, forceStrike, forcesAt, isEmbargoed, legalMoves, moveForce, sendAidPackage,
   sendDiplomaticMessage, setProcurementBurden, setProcurementPolicy, startProcurement, strikeTargets, toggleEmbargo,
   type Action, type StrikeIntensity, type StrikeKind,
 } from '../game/engine'
@@ -50,7 +50,7 @@ interface GameStore {
   sendDiplomaticMessage: (targetId: string, message: string) => void
   mediatePeace: (sideAId: string, sideBId: string, message: string) => Promise<void>
   requestCeasefire: (targetId: string, message: string) => Promise<void>
-  respondCeasefire: (requestId: string, accepted: boolean, message: string) => void
+  respondCeasefire: (requestId: string, accepted: boolean, message: string) => Promise<void>
   enterStrike: (intensity: StrikeIntensity) => void
   enterAirStrike: (intensity: StrikeIntensity) => void
   cancelAction: () => void
@@ -62,8 +62,10 @@ interface GameStore {
 
 function selectFx(game: GameState, forceId: string | null) {
   if (!forceId) return { selectedForceId: null, selectedInstallId: null, mode: 'move' as Mode, moveTargets: [], strikeTargets: [] }
+  if (hasPendingPlayerDiplomacy(game)) return null
   const force = game.forces.find((f) => f.id === forceId)
   if (!force || force.owner !== currentFactionId(game)) return null
+  if (game.factions[force.owner]?.exiled) return null
   return { selectedForceId: forceId, selectedInstallId: null, mode: 'move' as Mode, moveTargets: legalMoves(game, force), strikeTargets: [] }
 }
 
@@ -81,6 +83,27 @@ function buildOpeningState(): { game: GameState; lastAttack: AttackFx | null } {
     game: result,
     lastAttack: moved ? { from, to: dmz, key: Date.now(), forceId: army.id, won: hexEquals(moved.hex, dmz) } : null,
   }
+}
+
+function isHostileAdvance(game: GameState, force: Force, to: Hex): boolean {
+  const tile = game.tiles[key(to)]
+  return (
+    (!!tile?.owner && tile.owner !== force.owner) ||
+    forcesAt(game, to).some((other) => other.owner !== force.owner)
+  )
+}
+
+function playerResponderId(game: GameState, request: CeasefireRequest): string | undefined {
+  if (request.kind === 'mediation') {
+    if (game.factions[request.to]?.type === 'player') return request.to
+    if (request.counterpartId && game.factions[request.counterpartId]?.type === 'player') return request.counterpartId
+    return undefined
+  }
+  return game.factions[request.to]?.type === 'player' ? request.to : undefined
+}
+
+function hasPendingPlayerDiplomacy(game: GameState): boolean {
+  return (game.ceasefireRequests ?? []).some((request) => !!playerResponderId(game, request))
 }
 
 export const useGameStore = create<GameStore>()(persist((set, get) => ({
@@ -127,15 +150,21 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   selectInstall: (installId) => {
     const { game } = get()
+    if (hasPendingPlayerDiplomacy(game)) return
     const inst = game.installations.find((i) => i.id === installId)
     if (!inst || inst.type !== 'air_base' || inst.owner !== currentFactionId(game)) return
+    if (game.factions[inst.owner]?.exiled) return
     sfx.select()
     set({ selectedInstallId: installId, selectedForceId: null, mode: 'move', moveTargets: [], strikeTargets: [], inspectHex: inst.hex })
   },
 
   clickHex: (h) => {
     const { game, selectedForceId, mode, strikeIntensity, moveTargets, strikeTargets: tgts } = get()
-    if (game.regimeFallen || get().aiPending) return
+    if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
+    if (game.factions[currentFactionId(game)]?.exiled) {
+      set({ selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], inspectHex: h })
+      return
+    }
 
     // Strike modes: click a target to resolve, anything else cancels.
     if (mode === 'strike' || mode === 'airstrike') {
@@ -167,13 +196,8 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
     // Move mode: move the selected force first, so friendly stacks don't steal the click.
     if (selectedForceId && moveTargets.some((t) => hexEquals(t, h))) {
-      const myAlign = game.factions[currentFactionId(game)].alignment
       const force = game.forces.find((f) => f.id === selectedForceId)
-      const tile = game.tiles[key(h)]
-      const targetHasEnemy = forcesAt(game, h).some((f) => game.factions[f.owner].alignment !== myAlign)
-      const armyAttack = !!force && force.type === 'army_group' && (
-        targetHasEnemy || tile?.owner !== force.owner || !!tile?.disputedBy || !!tile?.dmz
-      )
+      const armyAttack = !!force && force.type === 'army_group' && isHostileAdvance(game, force, h)
       const from = force?.hex ?? h
       const result = moveForce(game, selectedForceId, h)
       if (!armyAttack) sfx.move()
@@ -199,6 +223,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   claim: () => {
     const { game, selectedForceId } = get()
+    if (hasPendingPlayerDiplomacy(game)) return
     const force = game.forces.find((f) => f.id === selectedForceId)
     if (!force || !canClaim(game, force)) return
     const result = claimHex(game, force.id)
@@ -210,9 +235,11 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
   // Stage (don't apply) a trade change. It commits when the player ends the turn.
   toggleTrade: (targetId) => {
     const { game, pendingTrade } = get()
-    if (game.regimeFallen) return
-    const actual = isEmbargoed(game, currentFactionId(game), targetId)
-    if (actual && embargoOwner(game, currentFactionId(game), targetId) !== currentFactionId(game)) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
+    const cur = currentFactionId(game)
+    if (game.factions[cur]?.exiled) return
+    const actual = isEmbargoed(game, cur, targetId)
+    if (actual && embargoOwner(game, cur, targetId) !== cur) return
     const desired = targetId in pendingTrade ? pendingTrade[targetId] : actual
     const newDesired = !desired
     const next = { ...pendingTrade }
@@ -224,7 +251,8 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   setProcurementPolicy: (policy) => {
     const { game } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
+    if (game.factions[currentFactionId(game)]?.exiled) return
     const result = setProcurementPolicy(game, currentFactionId(game), policy)
     if (result !== game) sfx.confirm()
     set({ game: result })
@@ -232,7 +260,8 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   setProcurementBurden: (burden) => {
     const { game } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
+    if (game.factions[currentFactionId(game)]?.exiled) return
     const result = setProcurementBurden(game, currentFactionId(game), burden)
     if (result !== game) sfx.confirm()
     set({ game: result })
@@ -240,7 +269,8 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   startProcurement: (type) => {
     const { game } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
+    if (game.factions[currentFactionId(game)]?.exiled) return
     const result = startProcurement(game, currentFactionId(game), type)
     if (result !== game) sfx.confirm()
     set({ game: result })
@@ -248,7 +278,8 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   sendAidPackage: (targetId, type) => {
     const { game } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
+    if (game.factions[currentFactionId(game)]?.exiled) return
     const result = sendAidPackage(game, currentFactionId(game), targetId, type)
     if (result !== game) sfx.confirm()
     set({ game: result })
@@ -256,7 +287,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   sendDiplomaticMessage: (targetId, message) => {
     const { game } = get()
-    if (game.regimeFallen || get().aiPending) return
+    if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     const result = sendDiplomaticMessage(game, currentFactionId(game), targetId, message)
     if (result !== game) sfx.confirm()
     set({ game: result })
@@ -264,7 +295,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   mediatePeace: async (sideAId, sideBId, message) => {
     const { game } = get()
-    if (game.regimeFallen || get().aiPending) return
+    if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
     try {
       const res = await fetch('http://localhost:3001/api/mediation-response', {
@@ -285,7 +316,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   requestCeasefire: async (targetId, message) => {
     const { game } = get()
-    if (game.regimeFallen || get().aiPending) return
+    if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
     try {
       const res = await fetch('http://localhost:3001/api/ceasefire-response', {
@@ -304,26 +335,53 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     }
   },
 
-  respondCeasefire: (requestId, accepted, message) => {
+  respondCeasefire: async (requestId, accepted, message) => {
     const { game } = get()
     if (game.regimeFallen || get().aiPending) return
-    const result = respondCeasefire(game, currentFactionId(game), requestId, accepted ? 'accepted' : 'rejected', message)
-    if (result !== game) sfx.confirm()
-    set({ game: result })
+    const request = (game.ceasefireRequests ?? []).find((item) => item.id === requestId)
+    const responderId = request ? playerResponderId(game, request) : undefined
+    if (!request || !responderId) return
+    let resumeAiTurn = false
+    set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
+    try {
+      const res = await fetch('http://localhost:3001/api/player-diplomacy-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: game,
+          requestId,
+          responderId,
+          response: accepted ? 'accepted' : 'rejected',
+          message,
+        }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { finalState } = await res.json() as { finalState: typeof game }
+      sfx.confirm()
+      set({ game: finalState, pendingTrade: {} })
+      resumeAiTurn = finalState.factions[currentFactionId(finalState)]?.type !== 'player'
+    } catch (err) {
+      console.error('[respondCeasefire]', err)
+    } finally {
+      set({ aiPending: false })
+      if (resumeAiTurn) setTimeout(() => { void get().runAiTurn() }, 0)
+    }
   },
 
   enterStrike: (intensity) => {
     const { game, selectedForceId } = get()
+    if (hasPendingPlayerDiplomacy(game)) return
     const force = game.forces.find((f) => f.id === selectedForceId)
-    if (!force || !canStrike(force)) return
+    if (!force || game.factions[force.owner]?.exiled || !canStrike(force)) return
     sfx.select()
     set({ mode: 'strike', strikeIntensity: intensity, strikeTargets: strikeTargets(game, force), moveTargets: [] })
   },
 
   enterAirStrike: (intensity) => {
     const { game, selectedInstallId } = get()
+    if (hasPendingPlayerDiplomacy(game)) return
     const base = game.installations.find((i) => i.id === selectedInstallId)
-    if (!base || (base.charges ?? 0) < (intensity === 'full' ? 2 : 1)) return
+    if (!base || game.factions[base.owner]?.exiled || (base.charges ?? 0) < (intensity === 'full' ? 2 : 1)) return
     const targets = airBaseTargets(game, base.id)
     if (!targets.length) return
     sfx.select()
@@ -334,12 +392,14 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   endTurn: () => {
     const { game, pendingTrade } = get()
-    if (game.regimeFallen) return
+    if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
     // Commit staged trade changes for the acting nation, then advance.
     const cur = currentFactionId(game)
     let g = game
-    for (const [target, desired] of Object.entries(pendingTrade)) {
-      if (desired !== isEmbargoed(g, cur, target)) g = toggleEmbargo(g, cur, target)
+    if (!game.factions[cur]?.exiled) {
+      for (const [target, desired] of Object.entries(pendingTrade)) {
+        if (desired !== isEmbargoed(g, cur, target)) g = toggleEmbargo(g, cur, target)
+      }
     }
     const next = endFactionTurn(g)
     sfx.endTurn()
@@ -352,7 +412,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   runAiTurn: async () => {
     const { game } = get()
-    if (get().aiPending) return
+    if (get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
     try {
       const res = await fetch('http://localhost:3001/api/agent-turn', {
@@ -372,16 +432,14 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
         if (action.type === 'move_force') {
           const force = replay.forces.find((f) => f.id === action.forceId)
           if (force) {
-            const myAlign = replay.factions[force.owner].alignment
-            const tile = replay.tiles[key(action.to)]
-            const isAttack =
-              forcesAt(replay, action.to).some((f) => replay.factions[f.owner].alignment !== myAlign) ||
-              tile?.owner !== force.owner || !!tile?.disputedBy || !!tile?.dmz
+            const isAttack = isHostileAdvance(replay, force, action.to)
             if (isAttack) {
               const from = force.hex
+              const before = replay
               replay = dispatch(replay, action)
               const moved = replay.forces.find((f) => f.id === action.forceId)
-              events.push({ type: 'attack', fx: { from, to: action.to, key: Date.now(), forceId: action.forceId, won: !!moved && hexEquals(moved.hex, action.to) } })
+              const won = !!moved && hexEquals(moved.hex, action.to)
+              if (replay !== before) events.push({ type: 'attack', fx: { from, to: action.to, key: Date.now(), forceId: action.forceId, won } })
               continue
             }
           }

@@ -2,7 +2,7 @@ import { availableActions, isEmbargoed, toggleEmbargo } from '../../src/game/eng
 import type { Action } from '../../src/game/engine.ts'
 import type { FactionId, Force, GameState, Hex, Installation, Tile } from '../../src/game/types.ts'
 import { key } from '../../src/game/hexUtils.ts'
-import { summarizeState } from '../summarize.ts'
+import { recentCoalitionPressureOnKazrek, summarizeState } from '../summarize.ts'
 import type { AgentTool } from './types.ts'
 
 const FORCE_LABEL: Record<string, string> = {
@@ -86,7 +86,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'toggle_trade',
-    description: 'Embargo or restore trade with another nation. Embargo is a diplomatic signal of disapproval, not a commitment to war.',
+    description: 'Embargo or restore trade with another nation. Embargo is a common response to aggression: stronger than a warning, but short of military action.',
     input_schema: {
       type: 'object',
       properties: {
@@ -330,6 +330,24 @@ export function buildSystemPrompt(state: GameState, factionId: FactionId): strin
   if (returnLandActions.length) actionLines.push(`  return_land options: [${returnLandActions.join('; ')}]`)
   if (other.length) actionLines.push(`  other: ${[...new Set(other)].join(', ')}`)
 
+  if (faction.exiled) {
+    return `You are ${faction.name}'s government in exile in Escalation, a geopolitical crisis simulation.
+
+EXILE ROLE:
+You no longer control cities, forces, procurement, trade policy, aid, or territory. Do not attempt military, procurement, embargo, aid, or land-return actions.
+Act as an exiled political authority: issue public statements, message states, ask for ceasefires or peace, and mediate agreements that could restore security or legitimacy.
+
+DECISION METHOD:
+Treat recent actions as a question: What just happened, and what diplomatic response would best preserve your mandate, protect civilians, and create a historically plausible path back from exile?
+
+${summary}
+
+AVAILABLE ACTIONS:
+${actionLines.join('\n') || '  (none - call end_turn)'}
+
+Take your exile turn using the tools. You may take multiple diplomatic actions. When finished, call end_turn with a public pressStatement of no more than 3 sentences.`
+  }
+
   return `You are ${faction.name} in Escalation, a geopolitical crisis simulation.
 
 SIMULATION PURPOSE:
@@ -350,7 +368,10 @@ States can send messages to each other as a normal diplomatic action. Use send_m
 Peace offers and mediation are stronger diplomatic tools: use propose_peace or mediate_peace when a pause should include terms. Returning captured land is a major de-escalation signal and can be offered in peace terms.
 
 EMBARGO JUDGMENT:
-Embargo is a diplomatic tool for signaling disapproval and applying pressure before committing to a war path. It hurts your own economy as well as the target's economy. Aggressively embargoing nations that have not taken hostile or aggressive acts can anger your own population, alarm allies, and look reckless. Use embargoes when there is a clear political reason: hostile action, coercion, treaty violation, direct threat, or deliberate pressure short of war.
+Embargo is a common diplomatic response that applies real pressure without committing to war. When another state attacks, seizes territory, threatens an ally, uses coercion, or violates an agreement, seriously consider an embargo as the practical middle step between sending a warning and using force. It hurts your economy as well as the target's, so avoid arbitrary embargoes against peaceful allies or neutrals, but do not reserve it only for extreme situations.
+
+SEIZING CONTESTED TERRITORY:
+Treat contested territory like Kashmir: moving forces onto it or claiming it is a de facto commitment to war if a rival claimant can fight back. Never seize it merely to signal weakness or because the move is available; do so only with a deliberate strategic objective and readiness for sustained conflict and diplomatic consequences.
 
 ${summary}
 
@@ -369,11 +390,30 @@ function actionContext(state: GameState, factionId: FactionId, action: Action): 
     case 'move_force':
       return `[destination: ${tileContext(state, factionId, action.to, shouldWarnArmyEntry(state, action))}]`
     case 'force_strike':
-    case 'air_strike':
-      return `[target: ${tileContext(state, factionId, action.target)}; ${targetContents(state, factionId, action.target)}]`
+    case 'air_strike': {
+      const pressure = horizontalEscalationNote(state, factionId, action.target, action.intensity)
+      return `[target: ${tileContext(state, factionId, action.target)}; ${targetContents(state, factionId, action.target)}${pressure ? `; ${pressure}` : ''}]`
+    }
     default:
       return ''
   }
+}
+
+function horizontalEscalationNote(
+  state: GameState,
+  factionId: FactionId,
+  target: Hex,
+  intensity: 'limited' | 'full',
+): string | null {
+  if (factionId !== 'volkaria' && factionId !== 'drovenia') return null
+  if (recentCoalitionPressureOnKazrek(state).length === 0) return null
+  const militaryTarget =
+    forcesAtHex(state, target).some((force) => force.owner === 'tamarisk') ||
+    installationsAt(state, target).some((inst) => inst.owner === 'tamarisk' && inst.type !== 'city')
+  if (!militaryTarget) return null
+  return intensity === 'limited'
+    ? 'controlled horizontal-pressure option against Aurelia over recent coalition action against Kazrek; explain that link publicly'
+    : 'full strike exceeds controlled Kazrek-linked pressure and risks wider war'
 }
 
 function tileContext(state: GameState, factionId: FactionId, hex: Hex, warnArmyEntry = false): string {

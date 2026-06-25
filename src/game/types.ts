@@ -55,6 +55,9 @@ export interface Faction {
   tradeWeight: number
   /** Relations toward the player, -100 (hostile) .. +100 (aligned). */
   disposition: number
+  /** True once all of this faction's cities have been occupied. Exiled governments keep diplomacy only. */
+  exiled?: boolean
+  exiledTurn?: number
   procurement: ProcurementState
   // --- Prose that will seed the Phase 3 Government/Population agents. ---
   doctrine: string

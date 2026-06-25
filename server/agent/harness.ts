@@ -33,6 +33,7 @@ export async function runAgentTurn(
     for (const call of toolCalls) {
       const execution = executeGameToolCall(currentState, call)
       currentState = execution.state
+      let awaitingPlayerResponse = false
 
       if (execution.action) actions.push(execution.action)
       if (execution.logEntry) log.push(execution.logEntry)
@@ -41,6 +42,7 @@ export async function runAgentTurn(
       if (execution.action && !execution.isError) {
         const resolved = await resolveImmediateDiplomacy(currentState, execution.action)
         currentState = resolved.state
+        awaitingPlayerResponse = !!resolved.awaitingPlayerResponse
         if (resolved.logEntry) log.push(resolved.logEntry)
       }
 
@@ -49,6 +51,11 @@ export async function runAgentTurn(
         content: execution.resultText,
         isError: execution.isError,
       })
+
+      if (awaitingPlayerResponse) {
+        adapter.addToolResults(toolResults)
+        return { actions, finalState: currentState, log, pressStatement }
+      }
 
       if (execution.endedTurn) {
         if (pressStatement) currentState = appendPressStatement(currentState, factionId, pressStatement)
@@ -93,9 +100,15 @@ function appendPressStatement(state: GameState, factionId: FactionId, statement:
 async function resolveImmediateDiplomacy(
   state: GameState,
   action: Action,
-): Promise<{ state: GameState; logEntry?: string }> {
+): Promise<{ state: GameState; logEntry?: string; awaitingPlayerResponse?: boolean }> {
   if (action.type === 'propose_ceasefire' || action.type === 'propose_peace') {
-    if (state.factions[action.targetId]?.type === 'player') return { state }
+    if (state.factions[action.targetId]?.type === 'player') {
+      return {
+        state,
+        awaitingPlayerResponse: true,
+        logEntry: `Waiting for ${state.factions[action.targetId].name}'s immediate response`,
+      }
+    }
     const request = (state.ceasefireRequests ?? []).find((item) =>
       item.from === currentFactionIdFromState(state) &&
       item.to === action.targetId &&
@@ -112,7 +125,14 @@ async function resolveImmediateDiplomacy(
   if (action.type === 'mediate_peace') {
     const sideA = state.factions[action.sideAId]
     const sideB = state.factions[action.sideBId]
-    if (!sideA || !sideB || sideA.type === 'player' || sideB.type === 'player') return { state }
+    if (!sideA || !sideB) return { state }
+    if (sideA.type === 'player' || sideB.type === 'player') {
+      return {
+        state,
+        awaitingPlayerResponse: true,
+        logEntry: `Waiting for the player's immediate mediation response`,
+      }
+    }
     const request = (state.ceasefireRequests ?? []).find((item) =>
       item.kind === 'mediation' &&
       item.from === currentFactionIdFromState(state) &&

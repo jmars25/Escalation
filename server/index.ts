@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { summarizeState } from './summarize.ts'
 import { agentRuntimeConfig, runAgentTurn } from './agent.ts'
-import { mediatePeace, proposeCeasefire, respondMediation } from '../src/game/engine.ts'
+import { mediatePeace, proposeCeasefire, respondCeasefire, respondMediation } from '../src/game/engine.ts'
 import { runCeasefireResponse, runPeaceDecision } from './agent/diplomacy.ts'
 import type { GameState, FactionId } from '../src/game/types.ts'
 
@@ -106,6 +106,71 @@ app.post('/api/mediation-response', async (req, res) => {
     res.json({ finalState, requestId: request.id, sideA, sideB })
   } catch (err) {
     console.error('[mediation-response]', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+/** POST /api/player-diplomacy-response - resolve an out-of-turn request addressed to the player.
+ *  Bilateral requests already contain the proposer's consent. Mediation still requires both sides.
+ */
+app.post('/api/player-diplomacy-response', async (req, res) => {
+  const { state, requestId, responderId, response, message } = req.body as {
+    state: GameState
+    requestId: string
+    responderId: FactionId
+    response: 'accepted' | 'rejected'
+    message: string
+  }
+  if (!state || !requestId || !responderId || (response !== 'accepted' && response !== 'rejected') || typeof message !== 'string') {
+    res.status(400).json({ error: 'state, requestId, responderId, response, and message required' })
+    return
+  }
+  const request = (state.ceasefireRequests ?? []).find((item) => item.id === requestId)
+  const responder = state.factions[responderId]
+  if (!request || responder?.type !== 'player') {
+    res.status(400).json({ error: 'player diplomatic request not found' })
+    return
+  }
+
+  try {
+    if (request.kind !== 'mediation') {
+      if (request.to !== responderId) {
+        res.status(400).json({ error: 'request is not addressed to this player' })
+        return
+      }
+      const finalState = respondCeasefire(state, responderId, requestId, response, message)
+      res.json({ finalState, player: { response, message } })
+      return
+    }
+
+    const sideAId = request.to
+    const sideBId = request.counterpartId
+    if (!sideBId || (sideAId !== responderId && sideBId !== responderId)) {
+      res.status(400).json({ error: 'player is not a party to this mediation' })
+      return
+    }
+    const otherId = sideAId === responderId ? sideBId : sideAId
+    const other = state.factions[otherId]
+    if (!other) {
+      res.status(400).json({ error: 'other mediation party not found' })
+      return
+    }
+    const config = agentRuntimeConfig()
+    if (!config.hasKey) { res.status(500).json({ error: `${config.keyEnv} not set` }); return }
+    const otherDecision = await runPeaceDecision(state, requestId, otherId)
+    const playerMessage = message.trim() || (response === 'accepted'
+      ? 'We accept the mediated peace proposal.'
+      : 'We reject the mediated peace proposal under the current conditions.')
+    const finalState = sideAId === responderId
+      ? respondMediation(state, requestId, response, playerMessage, otherDecision.response, otherDecision.pressStatement)
+      : respondMediation(state, requestId, otherDecision.response, otherDecision.pressStatement, response, playerMessage)
+    res.json({
+      finalState,
+      player: { response, message: playerMessage },
+      other: { factionId: otherId, ...otherDecision },
+    })
+  } catch (err) {
+    console.error('[player-diplomacy-response]', err)
     res.status(500).json({ error: String(err) })
   }
 })

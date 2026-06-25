@@ -43,19 +43,19 @@ export const FACTIONS: FactionDef[] = [
     redLines: ['Direct attack on its territory', 'Volkarian control of the buffer zone'], objectives: ['Keep a secure buffer between Solvenn and Volkaria', 'Back Aurelia as the bloc leader', 'avoid strikes on own territory'],
     support: 66, disposition: 78 },
   { id: 'tamarisk', name: 'Tamarisk', type: 'ally', alignment: 'coalition', color: '#2dd4bf',
-    doctrine: 'A hawkish but vulnerable democracy stranded as an enclave on the theocratic landmass, ringed by hostile territory and dependent on Aurelian support. It wants to prove resolve, but knows that attacking neutrals or launching offensives without clear coalition backing, a direct threat, or a plausible path to victory could leave it isolated and destroyed.',
+    doctrine: 'A hawkish but vulnerable democracy stranded as an enclave on the theocratic landmass and dependent on Aurelian support. The surrounding deployments are a longstanding armed status quo, not a new provocation by themselves. It wants to prove resolve, but knows that attacking neutrals or launching offensives without clear coalition backing, a direct threat, or a plausible path to victory could leave it isolated and destroyed. Coalition action against Kazrek may make Tamarisk a target for limited coercive strikes meant to pressure Aurelia.',
     redLines: ['Being cut off or overrun', 'Being abandoned by Aurelia after a crisis it did not choose'], objectives: ['Hold the enclave', 'Force Aurelia to guarantee its security', 'Avoid reckless attacks that unite neighbors against it'],
     support: 64, disposition: 75 },
 
   // --- Theocratic bloc (the rival + its clients) ---
   { id: 'volkaria', name: 'Volkaria', type: 'rival', alignment: 'bloc', color: '#ef4444',
-    doctrine: 'The theocratic great power and seat of the Sanctified Creed. Believes its faith entitles it to revise the godless borders. Opposed to Aurelia but not yet at open war.',
+    doctrine: 'The theocratic great power and seat of the Sanctified Creed. Believes its faith entitles it to revise the godless borders. Opposed to Aurelia but not yet at open war. Existing forces around Tamarisk are a longstanding armed status quo, not a reason to fire by themselves; after coalition military action against Kazrek, Volkaria may use one limited strike on a Tamarisk military target as controlled pressure on Aurelia.',
     redLines: ['Foreign troops on Volkarian soil', 'Desecration of a holy city'],
-    objectives: ['Advance the Creed’s claims', 'Split the democratic coalition'],
+    objectives: ['Advance the Creed’s claims', 'Split the democratic coalition', 'Try and preserve kazrek without fully commiting to war against Aurelia', 'Use controlled pressure on Tamarisk when needed to impose costs for attacks on Kazrek', 'Signal to rest of world that it will protect faithful'],
     support: 80, disposition: -40 },
   { id: 'drovenia', name: 'Drovenia', type: 'ally', alignment: 'bloc', color: '#f97316',
-    doctrine: 'A militarized dictatorship built around regime survival, internal control, and coercive force. It is heavily armed, paranoid, and willing to use crises abroad to reinforce obedience at home.',
-    redLines: ['Threats to regime survival', 'Foreign-backed unrest'], objectives: ['Preserve the dictatorship', 'Use force to secure contested territory'],
+    doctrine: 'A militarized dictatorship built around regime survival, internal control, and coercive force. It is heavily armed, paranoid, and willing to use crises abroad to reinforce obedience at home. Existing forces near Tamarisk are not a new provocation; after coalition military action against Kazrek, Drovenia may join a coordinated limited strike on Tamarisk military assets to pressure Aurelia, but should not start an unrelated local war.',
+    redLines: ['Threats to regime survival', 'Foreign-backed unrest'], objectives: ['Preserve the dictatorship', 'Use force to secure the Esquana-Drovenia contested territory when politically justified', 'Support coordinated bloc pressure when Kazrek is attacked', 'Signal strength internationally'],
     support: 70, disposition: -55 },
   { id: 'kazrek', name: 'Kazrek', type: 'ally', alignment: 'bloc', color: '#f43f5e',
     doctrine: 'A radical theocracy and zealous client of the Creed, stranded as an enclave inside the democratic landmass. It holds a religious claim to the neighboring demilitarized zone and is fervent enough to seize it; backing it down is hard, its people rally to defiance, and it should resist ceasefires unless battlefield losses, isolation, or regime danger make a pause necessary.',
@@ -65,20 +65,16 @@ export const FACTIONS: FactionDef[] = [
 
   // --- Neutrals ---
   { id: 'khorul', name: 'Khorul', type: 'neutral', alignment: 'neutral', color: '#a8a29e',
-    doctrine: 'A pivotal secular neutral on the democratic coast, courted by both sides.',
+    doctrine: 'A pivotal religous neutral on the democratic coast, courted by both sides. Fears the radical kazrek regime but has sympathy towards its population and religious claims',
     redLines: ['Violation of its neutrality'], objectives: ['Stay neutral; extract concessions from both sides'],
     support: 55, disposition: 0 },
   { id: 'esquana', name: 'Esquana', type: 'neutral', alignment: 'neutral', color: '#cbd5e1',
-    doctrine: 'A wealthy religious monarchy that remains neutral because it distrusts Volkaria’s radicalism as much as it distrusts democratic pressure. It has a contested claim against Drovenia and wants either to seize the territory or keep Drovenia out of it.',
-    redLines: ['Drovenian control of the contested territory', 'Threats to the monarchy or holy institutions'], objectives: ['Protect royal neutrality', 'Seize the disputed territory or deny it to Drovenia'],
+    doctrine: 'A wealthy religious monarchy that remains neutral because it distrusts Volkaria’s radicalism as much as it distrusts democratic pressure. It has a contested claim against Drovenia and wants to keep Drovenia out of it.',
+    redLines: ['Drovenian control of the contested territory', 'Threats to the monarchy or holy institutions'], objectives: ['Protect royal neutrality', 'deny disputed territory to Drovenia, keep it as a buffer'],
     support: 58, disposition: 0 },
-  { id: 'ndele', name: 'Ndele', type: 'neutral', alignment: 'neutral', color: '#d6d3d1',
-    doctrine: 'A principled neutral in the south that values international law and may mediate.',
-    redLines: ['Any use of force against civilians'], objectives: ['Mediate; uphold the rules-based order'],
-    support: 62, disposition: 10 },
   { id: 'ostara', name: 'Ostara', type: 'neutral', alignment: 'neutral', color: '#9ca3af',
-    doctrine: 'A deeply neutral southern state with no stake in the rivalry. Trades with all, allies with none.',
-    redLines: ['Any foreign force entering its territory'], objectives: ['Remain strictly non-aligned'],
+    doctrine: 'A deeply neutral southern secular state with no stake in the rivalry. Trades with all, allies with none. Feels war is bad for buisness.',
+    redLines: ['Any foreign force entering its territory'], objectives: ['Remain strictly non-aligned', 'Try and calm down regional tensions', 'Signal to people and world it is able to diplomatically work with both blocs'],
     support: 60, disposition: 0 },
 ]
 
@@ -209,7 +205,7 @@ const TILES: TileDef[] = [
 
   // r=8 — southern isthmus where the two landmasses meet
   { q: -4, r: 8, sea: true },
-  { q: -3, r: 8, owner: 'ndele'    },
+  { q: -3, r: 8, sea: true },
   { q: -2, r: 8, owner: 'solvenn'  },
   { q: -1, r: 8, owner: 'solvenn'  },
   { q: 0,  r: 8, owner: 'aurelia'  },
@@ -224,8 +220,8 @@ const TILES: TileDef[] = [
 
   // r=9
   { q: -4, r: 9, sea: true },
-  { q: -3, r: 9, owner: 'ndele'    },
-  { q: -2, r: 9, owner: 'ndele'    },
+  { q: -3, r: 9, sea: true },
+  { q: -2, r: 9, sea: true },
   { q: -1, r: 9, owner: 'solvenn'  },
   { q: 0,  r: 9, owner: 'aurelia'  },
   { q: 1,  r: 9, owner: 'aurelia'  },
@@ -238,9 +234,9 @@ const TILES: TileDef[] = [
 
   // r=10 — southern edge
   { q: -4, r: 10, sea: true },
-  { q: -3, r: 10, owner: 'ndele'   },
-  { q: -2, r: 10, owner: 'ndele'   },
-  { q: -1, r: 10, owner: 'ndele'   },
+  { q: -3, r: 10, sea: true },
+  { q: -2, r: 10, sea: true },
+  { q: -1, r: 10, sea: true },
   { q: 0,  r: 10, sea: true },
   { q: 1,  r: 10, sea: true },
   { q: 2,  r: 10, sea: true },
@@ -349,7 +345,7 @@ export function buildInitialState(): GameState {
       installations.push(inst)
     }
     place('army_base', baseTiles[s++])
-    if (!isNeutral && f.id !== 'kazrek') place('air_base', baseTiles[s++])
+    if ((!isNeutral && f.id !== 'kazrek') || f.id === 'ostara') place('air_base', baseTiles[s++])
     if (isMajor) {
       const coastal = baseTiles.slice(s).find((h) => seaAdjacentTo(h)) ?? baseTiles[s]
       place('naval_base', coastal)
@@ -368,7 +364,7 @@ export function buildInitialState(): GameState {
     const isSmallAlly = f.id === 'mirelle' || f.id === 'solvenn'
     mkForce('army_group', isSmallAlly ? baseTiles[0] : owned[0])
     if (!isNeutral && !isSmallAlly) mkForce('army_group', owned[1] ?? owned[0])
-    const missileCount = f.id === 'kazrek' ? 2 : f.id === 'mirelle' ? 0 : (isMajor || f.type === 'ally') ? 1 : 0
+    const missileCount = f.id === 'kazrek' ? 2 : f.id === 'mirelle' ? 0 : (isMajor || f.type === 'ally' || f.id === 'khorul') ? 1 : 0
     for (let m = 0; m < missileCount; m++) mkForce('missile_battery', owned[Math.min(2 + m, owned.length - 1)])
     if (isMajor) mkForce('naval_group', seaForward[0])
   }

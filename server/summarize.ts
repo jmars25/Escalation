@@ -27,6 +27,20 @@ function tileDesc(tile: Tile | undefined, factions: GameState['factions']): stri
   return parts.join(' ') || 'unclaimed'
 }
 
+export function recentCoalitionPressureOnKazrek(state: GameState): GameState['log'] {
+  const earliestTurn = Math.max(1, state.turn - 1)
+  return state.log
+    .filter((event) =>
+      event.turn >= earliestTurn &&
+      event.kind === 'system' &&
+      !!event.faction &&
+      state.factions[event.faction]?.alignment === 'coalition' &&
+      /kazrek/i.test(event.text) &&
+      /assault|strike|pushes into|seize|claim|destroy/i.test(event.text),
+    )
+    .slice(0, 4)
+}
+
 export function summarizeState(state: GameState, factionId: FactionId): string {
   const faction = state.factions[factionId]
   const myAlign = faction.alignment
@@ -35,8 +49,49 @@ export function summarizeState(state: GameState, factionId: FactionId): string {
   // --- Header ---
   lines.push(`SITUATION — ${faction.name} — Round ${state.turn}`)
   lines.push(`Support ${faction.support}/100  |  Economy ${faction.market}/100`)
+  if (faction.exiled) {
+    lines.push('STATUS: Government in exile. You control no cities and should use statements, messages, ceasefire or peace proposals, and mediation only.')
+  }
   lines.push(`Global death toll ${state.deathToll ?? 0}  |  ${faction.name} deaths ${state.factionDeaths?.[factionId] ?? 0}`)
   lines.push('')
+
+  if (faction.exiled) {
+    lines.push('EXILE LEVERAGE:')
+    lines.push('  You have no military, procurement, trade, aid, or territorial control actions. Use statements, messages, ceasefire or peace proposals, and mediation.')
+    lines.push('')
+
+    const ceasefires = state.ceasefires ?? []
+    const pendingCeasefires = state.ceasefireRequests ?? []
+    const recentMessages = (state.diplomaticMessages ?? []).slice(0, 8)
+    if (ceasefires.length > 0 || pendingCeasefires.length > 0 || recentMessages.length > 0) {
+      lines.push('DIPLOMACY:')
+      for (const pair of ceasefires) {
+        const [a, b] = pair.split('|')
+        lines.push(`  Ceasefire active: ${state.factions[a]?.name ?? a} and ${state.factions[b]?.name ?? b}.`)
+      }
+      for (const request of pendingCeasefires) {
+        lines.push(`  Pending ceasefire: ${state.factions[request.from]?.name ?? request.from} asks ${state.factions[request.to]?.name ?? request.to}: "${request.message}"`)
+      }
+      for (const msg of recentMessages) {
+        const response = msg.response ? ` (${msg.response})` : ''
+        lines.push(`  [Round ${msg.turn}] ${state.factions[msg.from]?.name ?? msg.from} -> ${state.factions[msg.to]?.name ?? msg.to}${response}: "${msg.message}"`)
+      }
+      lines.push('')
+    }
+
+    const recentEvents = state.log.slice(0, 8)
+    if (recentEvents.length > 0) {
+      lines.push('RECENT ACTIONS TO RESPOND TO:')
+      for (const e of recentEvents) lines.push(`  [Round ${e.turn}] ${e.text}`)
+      lines.push('')
+    }
+
+    lines.push('YOUR MANDATE:')
+    lines.push(`  Objectives: ${faction.objectives.join(' | ')}`)
+    lines.push(`  Red lines:  ${faction.redLines.join(' | ')}`)
+    lines.push(`  Doctrine:   ${faction.doctrine}`)
+    return lines.join('\n')
+  }
 
   // --- My forces ---
   const myForces = state.forces.filter((f) => f.owner === factionId && f.health > 0)
@@ -108,10 +163,25 @@ export function summarizeState(state: GameState, factionId: FactionId): string {
   const hotTiles = Object.values(state.tiles).filter((t) => t.disputedBy || t.dmz)
   if (hotTiles.length > 0) {
     lines.push('FLASHPOINTS:')
-    lines.push('  Disputed flashpoints are serious political territory. Claiming them should have a clear reason and invite response.')
+    lines.push('  These are not routine territory. Moving forces onto or claiming a flashpoint is a de facto commitment to war with any rival claimant able to fight back. Do not do it merely because it is legal or to apply casual pressure; do it only when your government deliberately accepts likely armed conflict and has a political and military plan for it.')
     for (const t of hotTiles) {
       lines.push(`  (${t.hex.q},${t.hex.r}) — ${tileDesc(t, state.factions)}`)
     }
+    lines.push('')
+  }
+
+  const kazrekPressure = recentCoalitionPressureOnKazrek(state)
+  if (kazrekPressure.length > 0 && (factionId === 'volkaria' || factionId === 'drovenia')) {
+    lines.push('HORIZONTAL ESCALATION OPTION:')
+    lines.push('  Coalition military action against Kazrek gives your bloc a concrete reason to pressure Aurelia through vulnerable Tamarisk. Existing nearby forces are longstanding deployments and are not sufficient provocation by themselves.')
+    lines.push('  One limited strike on a Tamarisk military force or base can be a controlled coercive signal if the press statement explicitly links it to Kazrek. A city strike, full strike, territorial invasion, or repeated attacks would exceed limited pressure and risk a wider war.')
+    if (factionId === 'drovenia') lines.push('  Drovenia should use this mainly as coordinated bloc pressure, not as an unrelated local attack on Tamarisk.')
+    for (const event of kazrekPressure) lines.push(`  Trigger: [Round ${event.turn}] ${event.text}`)
+    lines.push('')
+  } else if (kazrekPressure.length > 0 && factionId === 'tamarisk') {
+    lines.push('HORIZONTAL ESCALATION RISK:')
+    lines.push('  Recent coalition military action against Kazrek may make Tamarisk a pressure target for Volkaria or Drovenia. Their longstanding nearby deployments are not new provocation, but a limited strike on your military could be coercive pressure on Aurelia. Seek coalition backing and respond proportionally rather than assuming every such strike requires immediate territorial war.')
+    for (const event of kazrekPressure) lines.push(`  Trigger: [Round ${event.turn}] ${event.text}`)
     lines.push('')
   }
 

@@ -32,8 +32,11 @@ const CASUALTY_FORMAT = new Intl.NumberFormat('en-US')
 
 function requestTitle(game: GameState, request: CeasefireRequest): string {
   const from = game.factions[request.from]?.name ?? request.from
-  const to = game.factions[request.counterpartId ?? request.to]?.name ?? (request.counterpartId ?? request.to)
-  if (request.kind === 'mediation') return `${from} mediates peace with ${to}`
+  if (request.kind === 'mediation') {
+    const sideA = game.factions[request.to]?.name ?? request.to
+    const sideB = game.factions[request.counterpartId ?? '']?.name ?? request.counterpartId ?? 'unknown party'
+    return `${from} mediates ${sideA} - ${sideB}`
+  }
   if (request.kind === 'peace_offer') return `${from} offers peace`
   return `${from} asks for ceasefire`
 }
@@ -75,6 +78,7 @@ export function Sidebar() {
 
   const currentId = game.order[game.turnIndex]
   const current = game.factions[currentId]
+  const currentExiled = !!current.exiled
   const selected = game.forces.find((f) => f.id === selectedForceId)
   const selectedBase = game.installations.find((i) => i.id === selectedInstallId)
   const tile = selected ? game.tiles[key(selected.hex)] : undefined
@@ -100,8 +104,14 @@ export function Sidebar() {
     mediationTargets.some((f) => f.id === mediateSideB && f.id !== selectedMediateA)
       ? mediateSideB
       : mediationTargets.find((f) => f.id !== selectedMediateA)?.id || ''
-  const incomingCeasefires = (game.ceasefireRequests ?? []).filter((request) => request.to === currentId)
-  const canSendDiplomacy = !!selectedDiploTarget && diploMessage.trim().length > 0 && !aiPending
+  const incomingCeasefires = (game.ceasefireRequests ?? []).filter((request) =>
+    request.kind === 'mediation'
+      ? game.factions[request.to]?.type === 'player' || (!!request.counterpartId && game.factions[request.counterpartId]?.type === 'player')
+      : game.factions[request.to]?.type === 'player',
+  )
+  const responseRequired = incomingCeasefires.length > 0
+  const turnLocked = aiPending || responseRequired
+  const canSendDiplomacy = !!selectedDiploTarget && diploMessage.trim().length > 0 && !turnLocked
   const selectedPair = [currentId, selectedDiploTarget].sort().join('|')
   const ceasefireUnavailable =
     (game.ceasefires ?? []).includes(selectedPair) ||
@@ -119,7 +129,7 @@ export function Sidebar() {
     mediateMessage.trim() ||
     diploMessage.trim() ||
     'We ask both governments to accept a mediated pause in hostilities and prevent further escalation.'
-  const canMediate = !aiPending && !mediationUnavailable
+  const canMediate = !turnLocked && !mediationUnavailable
 
   return (
     <aside className="sidebar">
@@ -163,23 +173,28 @@ export function Sidebar() {
               <span>Support <strong>{current.support}</strong></span>
               <span>Economy <strong>{current.market}</strong></span>
             </div>
-            {air.bases > 0 && (
+            {currentExiled && (
+              <div className="exile-banner">
+                Government in exile
+              </div>
+            )}
+            {!currentExiled && air.bases > 0 && (
               <div className="air-power">
                 <span>Air bases <strong>{air.bases}</strong> · {air.charges} sorties</span>
               </div>
             )}
           </div>
 
-          <div className="panel procurement-panel">
+          {!currentExiled && <div className="panel procurement-panel">
             <h2>Procurement</h2>
             <div className="seg-row">
               {POLICIES.map((p) => (
-                <button key={p} disabled={aiPending} className={proc.policy === p ? 'active' : ''} onClick={() => setPolicy(p)}>{POLICY_LABEL[p]}</button>
+                <button key={p} disabled={turnLocked} className={proc.policy === p ? 'active' : ''} onClick={() => setPolicy(p)}>{POLICY_LABEL[p]}</button>
               ))}
             </div>
             <div className="seg-row compact">
               {BURDENS.map((b) => (
-                <button key={b} disabled={aiPending} className={proc.burden === b ? 'active' : ''} onClick={() => setBurden(b)}>{BURDEN_LABEL[b]}</button>
+                <button key={b} disabled={turnLocked} className={proc.burden === b ? 'active' : ''} onClick={() => setBurden(b)}>{BURDEN_LABEL[b]}</button>
               ))}
             </div>
             <div className="proc-status">
@@ -200,7 +215,7 @@ export function Sidebar() {
                 const army = p === 'army_group'
                 const hardware = !army
                 const disabled = (army && proc.policy !== 'draft') || (hardware && proc.policy !== 'contracts' && proc.policy !== 'emergency')
-                return <button key={p} disabled={disabled || aiPending} onClick={() => startProject(p)}>{PROJECT_LABEL[p]}</button>
+                return <button key={p} disabled={disabled || turnLocked} onClick={() => startProject(p)}>{PROJECT_LABEL[p]}</button>
               })}
             </div>
             {allies.length > 0 && (
@@ -208,13 +223,13 @@ export function Sidebar() {
                 {allies.map((ally) => (
                   <div key={ally.id} className="aid-row">
                     <span>{ally.name}</span>
-                    <button disabled={aiPending} onClick={() => sendAid(ally.id, 'economic')}>Economic Aid</button>
-                    <button disabled={aiPending} onClick={() => sendAid(ally.id, 'arms')}>Arms</button>
+                    <button disabled={turnLocked} onClick={() => sendAid(ally.id, 'economic')}>Economic Aid</button>
+                    <button disabled={turnLocked} onClick={() => sendAid(ally.id, 'arms')}>Arms</button>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </div>}
 
           <div className="panel diplomacy-panel">
             <h2>Diplomacy</h2>
@@ -224,6 +239,11 @@ export function Sidebar() {
                   <div key={request.id} className="ceasefire-request">
                     <strong>{requestTitle(game, request)}</strong>
                     <p>{request.message}</p>
+                    <p className="hint flush">
+                      {request.kind === 'mediation'
+                        ? 'This peace only takes effect if both named parties accept.'
+                        : 'The proposer has already agreed; your answer decides whether this bilateral ceasefire takes effect.'}
+                    </p>
                     {termText(game, request).map((term) => <p key={term} className="hint flush">{term}</p>)}
                     <textarea
                       value={ceasefireReply}
@@ -233,14 +253,14 @@ export function Sidebar() {
                       rows={2}
                     />
                     <div className="action-row">
-                      <button disabled={aiPending} onClick={() => { answerCeasefire(request.id, true, ceasefireReply); setCeasefireReply('') }}>Accept</button>
-                      <button disabled={aiPending} onClick={() => { answerCeasefire(request.id, false, ceasefireReply); setCeasefireReply('') }}>Reject</button>
+                      <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, true, ceasefireReply); setCeasefireReply('') }}>Accept</button>
+                      <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, false, ceasefireReply); setCeasefireReply('') }}>Reject</button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-            <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={aiPending}>
+            <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={turnLocked}>
               {diplomacyTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
             <textarea
@@ -249,7 +269,7 @@ export function Sidebar() {
               placeholder="Diplomatic message, max 3 sentences"
               maxLength={420}
               rows={3}
-              disabled={aiPending}
+              disabled={turnLocked}
             />
             <div className="action-row">
               <button
@@ -263,10 +283,10 @@ export function Sidebar() {
             </div>
             <div className="mediation-box">
               <div className="mediation-row">
-                <select value={selectedMediateA} onChange={(event) => setMediateSideA(event.target.value)} disabled={aiPending}>
+                <select value={selectedMediateA} onChange={(event) => setMediateSideA(event.target.value)} disabled={turnLocked}>
                   {mediationTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
-                <select value={selectedMediateB} onChange={(event) => setMediateSideB(event.target.value)} disabled={aiPending}>
+                <select value={selectedMediateB} onChange={(event) => setMediateSideB(event.target.value)} disabled={turnLocked}>
                   {mediationTargets.filter((f) => f.id !== selectedMediateA).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
@@ -276,7 +296,7 @@ export function Sidebar() {
                 placeholder="Mediation proposal, max 3 sentences"
                 maxLength={420}
                 rows={2}
-                disabled={aiPending}
+                disabled={turnLocked}
               />
               <button
                 className="ghost full"
@@ -291,8 +311,10 @@ export function Sidebar() {
           </div>
 
           <div className="panel">
-            <h2>{targeting ? 'Choose a target' : selectedBase ? 'Air Base' : 'Selected Force'}</h2>
-            {targeting ? (
+            <h2>{currentExiled ? 'Government in Exile' : targeting ? 'Choose a target' : selectedBase ? 'Air Base' : 'Selected Force'}</h2>
+            {currentExiled ? (
+              <p className="hint flush">This government controls no cities. It can send statements, ask for ceasefires or peace, and mediate agreements.</p>
+            ) : targeting ? (
               <>
                 <p className="hint">Click a <span style={{ color: '#ef4444' }}>red</span> hex to strike. Hitting a city rallies its population — a political risk.</p>
                 <button className="ghost full" onClick={cancelAction}>Cancel</button>
@@ -305,8 +327,8 @@ export function Sidebar() {
                 </div>
                 <p className="hint">Launch aircraft at any opposing force in range. Devastating against army groups.</p>
                 <div className="action-row">
-                  <button disabled={baseCharges < 1} onClick={() => enterAirStrike('limited')}>Limited</button>
-                  <button disabled={baseCharges < 2} onClick={() => enterAirStrike('full')}>Full</button>
+                  <button disabled={turnLocked || baseCharges < 1} onClick={() => enterAirStrike('limited')}>Limited</button>
+                  <button disabled={turnLocked || baseCharges < 2} onClick={() => enterAirStrike('full')}>Full</button>
                 </div>
               </>
             ) : selected ? (
@@ -318,9 +340,9 @@ export function Sidebar() {
                 </div>
                 <p className="hint">{FORCE_NOTE[selected.type]}</p>
                 <div className="action-row">
-                  {claimable && <button onClick={claim}>Claim {tile?.dmz ? 'DMZ' : 'hex'}</button>}
-                  {strikeable && <button disabled={charges < 1} onClick={() => enterStrike('limited')}>Limited</button>}
-                  {strikeable && <button disabled={charges < 2} onClick={() => enterStrike('full')}>Full</button>}
+                  {claimable && <button disabled={turnLocked} onClick={claim}>Claim {tile?.dmz ? 'DMZ' : 'hex'}</button>}
+                  {strikeable && <button disabled={turnLocked || charges < 1} onClick={() => enterStrike('limited')}>Limited</button>}
+                  {strikeable && <button disabled={turnLocked || charges < 2} onClick={() => enterStrike('full')}>Full</button>}
                 </div>
                 <p className="hint">{selected.acted ? 'This force has already acted this turn.' : 'Click a highlighted hex to deploy or attack.'}</p>
               </>
@@ -330,10 +352,10 @@ export function Sidebar() {
           </div>
 
           <div className="panel actions">
-            <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={aiPending}>
-              End {current.name}’s Turn ▸
+            <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={turnLocked}>
+              End {current.name}{currentExiled ? ' Exile' : ''} Turn ▸
             </button>
-            <button className="ghost" onClick={() => void runAiTurn()} disabled={aiPending}>
+            <button className="ghost" onClick={() => void runAiTurn()} disabled={turnLocked}>
               {aiPending ? "AI thinking..." : "AI: Take Turn"}
             </button>
           </div>

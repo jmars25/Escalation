@@ -27,6 +27,7 @@ export function InfoPanel() {
   const pendingTrade = useGameStore((s) => s.pendingTrade)
   const currentId = game.order[game.turnIndex]
   const currentName = game.factions[currentId].name
+  const currentExiled = !!game.factions[currentId].exiled
   const diplomaticMessages = game.diplomaticMessages ?? []
   const ceasefires = game.ceasefires ?? []
 
@@ -85,7 +86,11 @@ export function InfoPanel() {
                     <span title="domestic support" style={{ color: barColor(f.support) }}>♥{f.support}</span>
                     <span title={`economy ${f.market} · trade weight ${f.tradeWeight}`} style={{ color: barColor(f.market) }}>▤{f.market}</span>
                   </span>
-                  {f.procurement.project && (
+                  {f.exiled ? (
+                    <span className="fproc exile-badge" title={`Government in exile since round ${f.exiledTurn ?? '?'}`}>
+                      Exile
+                    </span>
+                  ) : f.procurement.project && (
                     <span className="fproc" title={`${PROJECT_LABEL[f.procurement.project.type]} +${procurementRate(game, f.id)} per turn`}>
                       {PROJECT_LABEL[f.procurement.project.type].split(' ')[0]} {Math.floor(f.procurement.project.progress)}/{projectCost(f.procurement.project.type)}
                     </span>
@@ -99,9 +104,9 @@ export function InfoPanel() {
                     return (
                       <button
                         className={`trade-btn ${intended ? 'cut' : 'open'}${pending ? ' pending' : ''}${locked ? ' locked' : ''}`}
-                        disabled={locked}
+                        disabled={locked || currentExiled}
                         title={`${currentName} ↔ ${f.name}: currently ${actual ? 'embargoed' : 'trading'}.` +
-                          (pending ? ` Staged to ${intended ? 'embargo' : 'restore'} — applies on End Turn.` : ' Click to stage a change.')}
+                          (currentExiled ? ' Exiled governments cannot change trade policy.' : pending ? ` Staged to ${intended ? 'embargo' : 'restore'} — applies on End Turn.` : ' Click to stage a change.')}
                         onClick={() => toggleTrade(f.id)}
                       >{locked ? 'Blocked' : pending ? (intended ? 'Embargo*' : 'Restore*') : (intended ? 'Embargoed' : 'Trading')}</button>
                     )

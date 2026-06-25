@@ -132,6 +132,18 @@ button.full { width: 100%; margin-top: 8px; }
 
 .air-power { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 10px; }
 .air-power strong { color: var(--text); }
+.exile-banner {
+  margin-top: 10px;
+  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 .strike-btns { display: flex; gap: 5px; }
 .strike-btns button { padding: 5px 7px; font-size: 11px; flex: none; }
 
@@ -204,6 +216,7 @@ button.full { width: 100%; margin-top: 8px; }
   max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: #93c5fd; font-size: 10px; font-variant-numeric: tabular-nums;
 }
+.exile-badge { color: #fcd34d; }
 
 .panel-note { font-size: 11px; color: var(--muted); line-height: 1.45; margin: 0 0 10px; }
 .panel-note strong { color: var(--text); }
