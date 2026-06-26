@@ -106,9 +106,11 @@ export interface Installation {
 
 // --- Forces: mobile assets you forward-deploy. Unlimited stacking per tile. ----
 //   army_group      — moves over land; can occupy/hold ground.
+//   marine          — like an army group but weaker; can also forward-deploy onto the
+//                     strait and storm adjacent land from the sea (amphibious assault).
 //   naval_group     — moves over sea; forward-deploys for strike packages.
 //   missile_battery — drone/missile deployment; launches strikes but CANNOT occupy a tile.
-export type ForceType = 'army_group' | 'naval_group' | 'missile_battery'
+export type ForceType = 'army_group' | 'marine' | 'naval_group' | 'missile_battery'
 
 export interface Force {
   id: string
@@ -172,6 +174,19 @@ export interface DiplomaticMessage {
   terms?: PeaceTerm[]
 }
 
+export interface PublicOpinionArticle {
+  id: string
+  turn: number
+  factionId: FactionId
+  supportDelta: number
+  supportBefore: number
+  supportAfter: number
+  mood: string
+  headline: string
+  article: string
+  preferredCourse: string
+}
+
 export interface GameState {
   /** Round number. Increments after every faction has taken its turn. */
   turn: number
@@ -195,9 +210,13 @@ export interface GameState {
   ceasefires: string[]
   /** Ceasefire proposals waiting for the target faction to answer. */
   ceasefireRequests: CeasefireRequest[]
+  /** Last round where a ceasefire, peace offer, or mediation was attempted for each faction pair. */
+  peacePairAttemptTurn?: Record<string, number>
   /** Diplomatic notes and ceasefire exchanges visible to agents and the player. */
   diplomaticMessages: DiplomaticMessage[]
   log: GameEvent[]
+  /** Factions whose support has hit zero. This is pressure, not a hard game over. */
+  supportCrises?: FactionId[]
   /** Set when a government's support collapses — the game is over. */
   regimeFallen?: FactionId
 }

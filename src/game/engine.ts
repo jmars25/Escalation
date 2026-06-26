@@ -36,6 +36,11 @@ export function canEnter(s: GameState, force: Force, h: Hex): boolean {
     if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
     return s.installations.some((i) => i.type === 'naval_base' && i.owner === force.owner && hexEquals(i.hex, h))
   }
+  // Marines move over land like an army, but may also put to sea on the strait.
+  if (force.type === 'marine') {
+    if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
+    return t.terrain === 'plains'
+  }
   if (force.type === 'missile_battery') return t.terrain !== 'mountain'
   return t.terrain === 'plains' // army_group
 }
@@ -65,6 +70,7 @@ function log(s: GameState, e: Omit<GameState['log'][number], 'turn'>) {
 function ensureDiplomacy(s: GameState) {
   s.ceasefires ??= []
   s.ceasefireRequests ??= []
+  s.peacePairAttemptTurn ??= {}
   s.diplomaticMessages ??= []
 }
 
@@ -119,6 +125,7 @@ function deathNote(n: number): string {
 function forceDeaths(type: ForceType, hpDamage: number, destroyed: boolean): number {
   const perHp: Record<ForceType, [number, number]> = {
     army_group: [6, 16],
+    marine: [5, 14],
     naval_group: [4, 12],
     missile_battery: [1, 4],
   }
@@ -165,13 +172,19 @@ function isDeployTarget(s: GameState, force: Force, h: Hex): boolean {
     if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
     return t.owner === force.owner // docking at own naval base on land
   }
+  // Marines deploy across home soil like an army, or stage out onto the strait.
+  if (force.type === 'marine') {
+    if ((t.terrain === 'sea' || t.terrain === 'island') && t.strait) return true
+    return t.owner === force.owner && t.terrain === 'plains'
+  }
   return t.owner === force.owner
 }
 
 function isArmyAttackTarget(s: GameState, force: Force, h: Hex): boolean {
-  if (force.acted || force.type !== 'army_group' || !isAdjacent(force.hex, h) || !canEnter(s, force, h)) return false
+  const groundUnit = force.type === 'army_group' || force.type === 'marine'
+  if (force.acted || !groundUnit || !isAdjacent(force.hex, h) || !canEnter(s, force, h)) return false
   const t = s.tiles[key(h)]
-  if (!t) return false
+  if (!t || t.terrain !== 'plains') return false // ground assault only seizes land (marines storm a coast)
   if (ceasefireBlocksEntry(s, force, h)) return false
   const mine = s.factions[force.owner].alignment
   return t.owner !== force.owner || !!t.disputedBy || !!t.dmz || tileDefenders(s, h, mine, force.owner).length > 0
@@ -219,7 +232,7 @@ function tileDefenders(s: GameState, to: Hex, attackerAlign: Alignment, attacker
   const out: Defender[] = []
   for (const f of s.forces) {
     if (!hexEquals(f.hex, to) || !enemy(f.owner)) continue
-    if (f.type === 'army_group' || f.type === 'naval_group') out.push({ kind: 'force', force: f, defStrength: f.strength })
+    if (f.type === 'army_group' || f.type === 'marine' || f.type === 'naval_group') out.push({ kind: 'force', force: f, defStrength: f.strength })
     else if (f.type === 'missile_battery') out.push({ kind: 'force', force: f, defStrength: 1.5 })
   }
   for (const i of s.installations) {
@@ -233,7 +246,7 @@ function claimOccupiedHex(s: GameState, force: Force): boolean {
   const t = s.tiles[key(force.hex)]
   if (!t || t.owner === force.owner) return false
   if (t.owner && hasCeasefire(s, force.owner, t.owner)) return false
-  const isLandClaim = force.type === 'army_group' && t.terrain === 'plains'
+  const isLandClaim = (force.type === 'army_group' || force.type === 'marine') && t.terrain === 'plains'
   const isIslandClaim = force.type === 'naval_group' && t.terrain === 'island'
   if (!isLandClaim && !isIslandClaim) return false
   const prevOwner = t.owner
@@ -273,7 +286,7 @@ function claimOccupiedHex(s: GameState, force: Force): boolean {
 export function resolveAssault(state: GameState, attackerId: string, to: Hex): GameState {
   const s = clone(state)
   const atk = s.forces.find((f) => f.id === attackerId)
-  if (!atk || atk.type !== 'army_group' || atk.acted || s.factions[atk.owner]?.exiled) return state
+  if (!atk || (atk.type !== 'army_group' && atk.type !== 'marine') || atk.acted || s.factions[atk.owner]?.exiled) return state
   if (!isArmyAttackTarget(s, atk, to)) return state
   const mine = s.factions[atk.owner].alignment
   const defs = tileDefenders(s, to, mine, atk.owner)
@@ -407,7 +420,7 @@ export function moveForce(state: GameState, forceId: string, to: Hex): GameState
 
   if (navalAssaulting) return resolveNavalAssault(state, forceId, to)
 
-  if (attacking && force.type === 'army_group') {
+  if (attacking && (force.type === 'army_group' || force.type === 'marine')) {
     const mine = s.factions[force.owner].alignment
     // Any defenders on the tile (enemy army, battery, or base) must be fought down
     // before you can advance — see resolveAssault.
@@ -452,6 +465,7 @@ export function moveForce(state: GameState, forceId: string, to: Hex): GameState
 
 export const LABEL: Record<Force['type'], string> = {
   army_group: 'an army group',
+  marine: 'a marine group',
   naval_group: 'a naval group',
   missile_battery: 'a missile battery',
 }
@@ -467,7 +481,7 @@ export function canClaim(s: GameState, force: Force): boolean {
   const t = s.tiles[key(force.hex)]
   if (!t || t.owner === force.owner) return false
   if (t.owner && hasCeasefire(s, force.owner, t.owner)) return false
-  if (force.type === 'army_group' && t.terrain !== 'plains') return false
+  if ((force.type === 'army_group' || force.type === 'marine') && t.terrain !== 'plains') return false
   if (force.type === 'naval_group' && t.terrain !== 'island') return false
   if (force.type === 'missile_battery') return false
   const mine = s.factions[force.owner].alignment
@@ -628,12 +642,14 @@ const POLICY_SUPPORT_COST: Record<ProcurementPolicy, number> = {
 
 const NEW_FORCE_HEALTH: Record<ForceType, number> = {
   army_group: 40,
+  marine: 30,
   naval_group: 55,
   missile_battery: 28,
 }
 
 const NEW_FORCE_STRENGTH: Record<ForceType, number> = {
   army_group: 7,
+  marine: 5,
   naval_group: 9,
   missile_battery: 4,
 }
@@ -843,6 +859,19 @@ export function pairKey(a: string, b: string): string {
   return [a, b].sort().join('|')
 }
 
+function requestSubjectPairKey(request: CeasefireRequest): string {
+  return pairKey(request.to, request.counterpartId ?? request.from)
+}
+
+function peacePairAttemptedThisTurn(s: GameState, a: string, b: string): boolean {
+  return (s.peacePairAttemptTurn?.[pairKey(a, b)] ?? -1) >= s.turn
+}
+
+function markPeacePairAttempt(s: GameState, a: string, b: string) {
+  ensureDiplomacy(s)
+  s.peacePairAttemptTurn![pairKey(a, b)] = s.turn
+}
+
 export function hasCeasefire(s: GameState, a: string, b: string): boolean {
   if (a === b) return false
   return (s.ceasefires ?? []).includes(pairKey(a, b))
@@ -1012,16 +1041,17 @@ function applyPeaceTerms(s: GameState, terms: PeaceTerm[] = []) {
   }
 }
 
-function hasOpenPeaceRequest(s: GameState, fromId: string, toId: string, counterpartId?: string): boolean {
-  return (s.ceasefireRequests ?? []).some((request) =>
-    request.from === fromId &&
-    request.to === toId &&
-    (request.counterpartId ?? '') === (counterpartId ?? ''),
-  )
+function hasOpenPeaceRequestForPair(s: GameState, a: string, b: string): boolean {
+  const pair = pairKey(a, b)
+  return (s.ceasefireRequests ?? []).some((request) => requestSubjectPairKey(request) === pair)
+}
+
+function canAttemptPeaceForPair(s: GameState, a: string, b: string): boolean {
+  return a !== b && !hasCeasefire(s, a, b) && !hasOpenPeaceRequestForPair(s, a, b) && !peacePairAttemptedThisTurn(s, a, b)
 }
 
 export function proposeCeasefire(state: GameState, fromId: string, toId: string, message: string): GameState {
-  if (fromId === toId || hasCeasefire(state, fromId, toId)) return state
+  if (!canAttemptPeaceForPair(state, fromId, toId)) return state
   const text = cleanDiplomaticMessage(message)
   if (!text) return state
   const s = clone(state)
@@ -1029,7 +1059,8 @@ export function proposeCeasefire(state: GameState, fromId: string, toId: string,
   const from = s.factions[fromId]
   const to = s.factions[toId]
   if (!from || !to) return state
-  if (hasOpenPeaceRequest(s, fromId, toId)) return state
+  if (!canAttemptPeaceForPair(s, fromId, toId)) return state
+  markPeacePairAttempt(s, fromId, toId)
   const request: CeasefireRequest = { id: nextDiplomacyId(s, 'cf'), from: fromId, to: toId, message: text, turn: s.turn, kind: 'ceasefire' }
   s.ceasefireRequests.unshift(request)
   s.diplomaticMessages.unshift({ ...request, kind: 'ceasefire_request' })
@@ -1045,7 +1076,7 @@ export function proposePeace(
   message: string,
   returnHexes: Hex[] = [],
 ): GameState {
-  if (fromId === toId || hasCeasefire(state, fromId, toId)) return state
+  if (!canAttemptPeaceForPair(state, fromId, toId)) return state
   const text = cleanDiplomaticMessage(message)
   if (!text) return state
   const s = clone(state)
@@ -1053,7 +1084,8 @@ export function proposePeace(
   const from = s.factions[fromId]
   const to = s.factions[toId]
   if (!from || !to) return state
-  if (hasOpenPeaceRequest(s, fromId, toId)) return state
+  if (!canAttemptPeaceForPair(s, fromId, toId)) return state
+  markPeacePairAttempt(s, fromId, toId)
   const terms = peaceTermsForHexes(s, fromId, returnHexes, toId)
   const request: CeasefireRequest = { id: nextDiplomacyId(s, 'cf'), from: fromId, to: toId, message: text, turn: s.turn, kind: 'peace_offer', terms }
   s.ceasefireRequests.unshift(request)
@@ -1072,7 +1104,7 @@ export function mediatePeace(
   message: string,
   returnHexes: Hex[] = [],
 ): GameState {
-  if (sideAId === sideBId || hasCeasefire(state, sideAId, sideBId)) return state
+  if (!canAttemptPeaceForPair(state, sideAId, sideBId)) return state
   const text = cleanDiplomaticMessage(message)
   if (!text) return state
   const s = clone(state)
@@ -1081,7 +1113,8 @@ export function mediatePeace(
   const sideA = s.factions[sideAId]
   const sideB = s.factions[sideBId]
   if (!mediator || !sideA || !sideB) return state
-  if (hasOpenPeaceRequest(s, mediatorId, sideAId, sideBId)) return state
+  if (!canAttemptPeaceForPair(s, sideAId, sideBId)) return state
+  markPeacePairAttempt(s, sideAId, sideBId)
   const terms = peaceTermsForHexes(s, sideBId, returnHexes, sideAId)
   const request: CeasefireRequest = {
     id: nextDiplomacyId(s, 'cf'),
@@ -1228,13 +1261,23 @@ export function respondMediation(
 
 function checkRegime(s: GameState) {
   if (s.regimeFallen) return
+  const crises = s.supportCrises ??= []
   for (const f of Object.values(s.factions)) {
-    if (f.support <= 0) {
-      s.regimeFallen = f.id
-      log(s, { kind: 'system', text: `${f.name}'s government collapses — domestic support has hit zero. Regime change.` })
+    if (f.support <= 0 && !crises.includes(f.id)) {
+      crises.push(f.id)
+      log(s, { kind: 'system', faction: f.id, text: `${f.name}'s government enters a legitimacy crisis - domestic support has hit zero. The crisis continues, but public pressure now demands a political course correction.` })
       return
     }
   }
+}
+
+export function applyPublicSupportDelta(state: GameState, factionId: string, delta: number): GameState {
+  const s = clone(state)
+  const f = s.factions[factionId]
+  if (!f || !Number.isFinite(delta)) return state
+  f.support = clamp(f.support + Math.round(delta))
+  checkRegime(s)
+  return s
 }
 
 /** Apply a strike to the target hex. A friendly garrison base shields any forces
@@ -1264,15 +1307,15 @@ function applyStrike(s: GameState, atkId: string, target: Hex, kind: StrikeKind,
       recomputeMarket(s, inst.owner)
       owner.support = clamp(owner.support + (intensity === 'full' ? 12 : 8)) // rally-round-the-flag
       owner.disposition = clamp(owner.disposition - 12, -100, 100)
-      log(s, { kind: 'system', faction: atkId, text: `${verb} on a ${owner.name} city (integrity ${inst.integrity}%). Outrage rallies its people behind their government; the economy reels.${deathNote(deaths)}` })
+      log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on a ${owner.name} city (integrity ${inst.integrity}%). Outrage rallies its people behind their government; the economy reels.${deathNote(deaths)}` })
     } else {
       owner.disposition = clamp(owner.disposition - 8, -100, 100)
       const garrisoned = shield === inst && !!enemyForce
       if (inst.integrity <= 0) {
         s.installations = s.installations.filter((i) => i.id !== inst.id)
-        log(s, { kind: 'system', faction: atkId, text: `${verb} on ${owner.name}'s ${inst.type.replace('_', ' ')} — destroyed.${deathNote(deaths)}` })
+        log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on ${owner.name}'s ${inst.type.replace('_', ' ')} — destroyed.${deathNote(deaths)}` })
       } else {
-        log(s, { kind: 'system', faction: atkId, text: `${verb} on ${owner.name}'s ${inst.type.replace('_', ' ')} (integrity ${inst.integrity}%${garrisoned ? ', shielding its garrison' : ''}).${deathNote(deaths)}` })
+        log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on ${owner.name}'s ${inst.type.replace('_', ' ')} (integrity ${inst.integrity}%${garrisoned ? ', shielding its garrison' : ''}).${deathNote(deaths)}` })
       }
     }
     return
@@ -1289,9 +1332,9 @@ function applyStrike(s: GameState, atkId: string, target: Hex, kind: StrikeKind,
     const deaths = addDeaths(s, enemyForce.owner, forceDeaths(enemyForce.type, damage, destroyed))
     if (enemyForce.health <= 0) {
       s.forces = s.forces.filter((f) => f.id !== enemyForce.id)
-      log(s, { kind: 'system', faction: atkId, text: `${verb} on ${on}'s ${forceNoun(enemyForce.type)} — destroyed.${deathNote(deaths)}` })
+      log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on ${on}'s ${forceNoun(enemyForce.type)} — destroyed.${deathNote(deaths)}` })
     } else {
-      log(s, { kind: 'system', faction: atkId, text: `${verb} on ${on}'s ${forceNoun(enemyForce.type)} (now ${enemyForce.health} HP).${deathNote(deaths)}` })
+      log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on ${on}'s ${forceNoun(enemyForce.type)} (now ${enemyForce.health} HP).${deathNote(deaths)}` })
     }
     s.factions[enemyForce.owner].disposition = clamp(s.factions[enemyForce.owner].disposition - 6, -100, 100)
   }
@@ -1390,7 +1433,7 @@ function exileActions(state: GameState, factionId: string): Action[] {
   for (const other of factions) {
     if (other.id === factionId) continue
     actions.push({ type: 'send_message', targetId: other.id, message: '' })
-    if (!hasCeasefire(state, factionId, other.id) && !hasOpenPeaceRequest(state, factionId, other.id)) {
+    if (canAttemptPeaceForPair(state, factionId, other.id)) {
       actions.push({ type: 'propose_ceasefire', targetId: other.id, message: '' })
       actions.push({ type: 'propose_peace', targetId: other.id, message: '', returnHexes: [] })
     }
@@ -1398,8 +1441,7 @@ function exileActions(state: GameState, factionId: string): Action[] {
   for (const sideA of factions) {
     if (sideA.id === factionId) continue
     for (const sideB of factions) {
-      if (sideB.id === factionId || sideB.id === sideA.id || hasCeasefire(state, sideA.id, sideB.id)) continue
-      if (hasOpenPeaceRequest(state, factionId, sideA.id, sideB.id)) continue
+      if (sideB.id === factionId || sideB.id === sideA.id || !canAttemptPeaceForPair(state, sideA.id, sideB.id)) continue
       actions.push({ type: 'mediate_peace', sideAId: sideA.id, sideBId: sideB.id, message: '', returnHexes: [] })
     }
   }
@@ -1483,9 +1525,7 @@ export function availableActions(state: GameState): Action[] {
   for (const other of Object.values(state.factions)) {
     if (other.id === factionId) continue
     actions.push({ type: 'send_message', targetId: other.id, message: '' })
-    if (!hasCeasefire(state, factionId, other.id) && !(state.ceasefireRequests ?? []).some((request) =>
-      request.from === factionId && request.to === other.id,
-    )) {
+    if (canAttemptPeaceForPair(state, factionId, other.id)) {
       actions.push({ type: 'propose_ceasefire', targetId: other.id, message: '' })
       actions.push({ type: 'propose_peace', targetId: other.id, message: '', returnHexes: [] })
     }
@@ -1500,8 +1540,7 @@ export function availableActions(state: GameState): Action[] {
   for (const sideA of factions) {
     if (sideA.id === factionId) continue
     for (const sideB of factions) {
-      if (sideB.id === factionId || sideB.id === sideA.id || hasCeasefire(state, sideA.id, sideB.id)) continue
-      if ((state.ceasefireRequests ?? []).some((request) => request.from === factionId && request.to === sideA.id && request.counterpartId === sideB.id)) continue
+      if (sideB.id === factionId || sideB.id === sideA.id || !canAttemptPeaceForPair(state, sideA.id, sideB.id)) continue
       actions.push({ type: 'mediate_peace', sideAId: sideA.id, sideBId: sideB.id, message: '', returnHexes: [] })
     }
   }

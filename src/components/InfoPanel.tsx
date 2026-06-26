@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
 import { PROJECT_LABEL, embargoOwner, isEmbargoed, procurementRate, projectCost } from '../game/engine'
 import { key } from '../game/hexUtils'
-import type { Force, Installation } from '../game/types'
+import type { Force, GameEvent, GameState, Installation } from '../game/types'
 
 /** Color a 0–100 political stat (support / economy). */
 function barColor(v: number): string {
@@ -15,12 +16,26 @@ const INSTALL_NAME: Record<Installation['type'], string> = {
   city: 'City', army_base: 'Army base', air_base: 'Air base', naval_base: 'Naval base', radar: 'Radar',
 }
 const FORCE_NAME: Record<Force['type'], string> = {
-  army_group: 'Army group', naval_group: 'Naval group', missile_battery: 'Missile battery',
+  army_group: 'Army group', marine: 'Marines', naval_group: 'Naval group', missile_battery: 'Missile battery',
+}
+
+function isPressStatement(event: GameEvent): boolean {
+  return event.kind === 'dispatch' && / press statement: /i.test(event.text)
+}
+
+function pressStatementLabel(game: GameState, event: GameEvent): string {
+  return event.faction ? game.factions[event.faction]?.name ?? event.faction : 'Press statement'
+}
+
+function pressStatementText(event: GameEvent): string {
+  const match = event.text.match(/press statement:\s*"?(.*?)"?$/i)
+  return match?.[1]?.trim() || event.text
 }
 
 /** Right-hand column: faction roster grouped by side + event log. The log is a
  *  stand-in for the Phase 3 "intelligence assessment" panel (agent reasoning). */
 export function InfoPanel() {
+  const [expandedLog, setExpandedLog] = useState<'diplomacy' | 'dispatches' | null>(null)
   const game = useGameStore((s) => s.game)
   const inspectHex = useGameStore((s) => s.inspectHex)
   const toggleTrade = useGameStore((s) => s.toggleTrade)
@@ -30,6 +45,8 @@ export function InfoPanel() {
   const currentExiled = !!game.factions[currentId].exiled
   const diplomaticMessages = game.diplomaticMessages ?? []
   const ceasefires = game.ceasefires ?? []
+  const pressStatements = game.log.filter(isPressStatement)
+  const dispatchEvents = game.log.filter((event) => !isPressStatement(event))
 
   const tile = inspectHex ? game.tiles[key(inspectHex)] : undefined
   const tileInstalls = inspectHex ? game.installations.filter((i) => key(i.hex) === key(inspectHex)) : []
@@ -41,6 +58,39 @@ export function InfoPanel() {
       .filter((f) => f.alignment === side)
       .sort((a, b) => (a.type === 'player' || a.type === 'rival' ? -1 : 0) - (b.type === 'player' || b.type === 'rival' ? -1 : 0)),
   }))
+  const showDiplomacyLog = ceasefires.length > 0 || diplomaticMessages.length > 0 || pressStatements.length > 0
+
+  const renderDiplomacyLog = (limit?: number) => (
+    <>
+      {ceasefires.map((pair) => {
+        const [a, b] = pair.split('|')
+        return <div key={pair} className="diplo-line active">Ceasefire: {game.factions[a]?.name ?? a} - {game.factions[b]?.name ?? b}</div>
+      })}
+      {diplomaticMessages.slice(0, limit).map((msg) => (
+        <div key={msg.id} className={`diplo-line ${msg.response ?? msg.kind}`}>
+          <strong>{game.factions[msg.from]?.name ?? msg.from} {'->'} {game.factions[msg.to]?.name ?? msg.to}</strong>
+          <span>{msg.message}</span>
+        </div>
+      ))}
+      {pressStatements.slice(0, limit).map((event, index) => (
+        <div key={`press-${event.turn}-${event.faction ?? 'none'}-${index}`} className="diplo-line press-statement">
+          <strong>{pressStatementLabel(game, event)} press statement</strong>
+          <span>{pressStatementText(event)}</span>
+        </div>
+      ))}
+    </>
+  )
+
+  const renderDispatchLog = () => (
+    <ul className="log">
+      {dispatchEvents.map((e, i) => (
+        <li key={i} className={`log-${e.kind}`}>
+          <span className="log-turn">T{e.turn}</span>
+          <span>{e.text}</span>
+        </li>
+      ))}
+    </ul>
+  )
 
   return (
     <section className="infopanel">
@@ -118,33 +168,37 @@ export function InfoPanel() {
         ))}
       </div>
 
-      {(ceasefires.length > 0 || diplomaticMessages.length > 0) && (
+      {showDiplomacyLog && (
         <div className="panel diplomacy-log">
-          <h2>Diplomacy</h2>
-          {ceasefires.map((pair) => {
-            const [a, b] = pair.split('|')
-            return <div key={pair} className="diplo-line active">Ceasefire: {game.factions[a]?.name ?? a} - {game.factions[b]?.name ?? b}</div>
-          })}
-          {diplomaticMessages.slice(0, 8).map((msg) => (
-            <div key={msg.id} className={`diplo-line ${msg.response ?? msg.kind}`}>
-              <strong>{game.factions[msg.from]?.name ?? msg.from} {'->'} {game.factions[msg.to]?.name ?? msg.to}</strong>
-              <span>{msg.message}</span>
-            </div>
-          ))}
+          <div className="panel-header">
+            <h2>Diplomacy</h2>
+            <button className="expand-btn" onClick={() => setExpandedLog('diplomacy')} title="Expand diplomacy" aria-label="Expand diplomacy">□</button>
+          </div>
+          {renderDiplomacyLog(8)}
         </div>
       )}
 
       <div className="panel log-panel">
-        <h2>Dispatches</h2>
-        <ul className="log">
-          {game.log.map((e, i) => (
-            <li key={i} className={`log-${e.kind}`}>
-              <span className="log-turn">T{e.turn}</span>
-              <span>{e.text}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="panel-header">
+          <h2>Dispatches</h2>
+          <button className="expand-btn" onClick={() => setExpandedLog('dispatches')} title="Expand dispatches" aria-label="Expand dispatches">□</button>
+        </div>
+        {renderDispatchLog()}
       </div>
+
+      {expandedLog && (
+        <div className="modal-backdrop" onClick={() => setExpandedLog(null)}>
+          <div className="expanded-window wide" role="dialog" aria-modal="true" aria-label={expandedLog === 'diplomacy' ? 'Expanded diplomacy' : 'Expanded dispatches'} onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h2>{expandedLog === 'diplomacy' ? 'Diplomacy' : 'Dispatches'}</h2>
+              <button className="expand-btn close-btn" onClick={() => setExpandedLog(null)} title="Close" aria-label="Close expanded window">x</button>
+            </div>
+            <div className={`expanded-body ${expandedLog === 'diplomacy' ? 'diplomacy-log expanded-log' : 'dispatch-log expanded-log'}`}>
+              {expandedLog === 'diplomacy' ? renderDiplomacyLog() : renderDispatchLog()}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

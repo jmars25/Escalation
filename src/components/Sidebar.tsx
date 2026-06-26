@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
-import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, procurementRate, projectCost } from '../game/engine'
+import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, pairKey, procurementRate, projectCost, returnableLand } from '../game/engine'
 import { key } from '../game/hexUtils'
-import type { CeasefireRequest, GameState, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
+import type { CeasefireRequest, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 
 
 const FORCE_NOTE: Record<string, string> = {
   army_group: 'Deploys anywhere inside its country, or attacks adjacent ground to claim it.',
+  marine: 'A lighter army group. Deploys over home soil or out onto the strait, then storms adjacent coast from the sea.',
   naval_group: 'Deploys once to home coastal waters. Strong strikes. Restocks next to a friendly base.',
   missile_battery: 'Deploys once inside its country; weak strikes; cannot occupy. Restocks next to a friendly base.',
 }
@@ -47,13 +48,28 @@ function termText(game: GameState, request: CeasefireRequest): string[] {
   )
 }
 
+function peacePairAttemptedThisTurn(game: GameState, a: string, b: string): boolean {
+  return (game.peacePairAttemptTurn?.[pairKey(a, b)] ?? -1) >= game.turn
+}
+
+function hexChoiceKey(hex: Hex): string {
+  return `${hex.q},${hex.r}`
+}
+
+function toggleHexChoice(selected: string[], hex: Hex): string[] {
+  const k = hexChoiceKey(hex)
+  return selected.includes(k) ? selected.filter((item) => item !== k) : [...selected, k]
+}
+
 export function Sidebar() {
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [diploTarget, setDiploTarget] = useState('')
   const [diploMessage, setDiploMessage] = useState('')
+  const [peaceReturnKeys, setPeaceReturnKeys] = useState<string[]>([])
   const [mediateSideA, setMediateSideA] = useState('')
   const [mediateSideB, setMediateSideB] = useState('')
   const [mediateMessage, setMediateMessage] = useState('')
+  const [mediationReturnKeys, setMediationReturnKeys] = useState<string[]>([])
   const [ceasefireReply, setCeasefireReply] = useState('')
   const game = useGameStore((s) => s.game)
   const selectedForceId = useGameStore((s) => s.selectedForceId)
@@ -67,12 +83,16 @@ export function Sidebar() {
   const reset = useGameStore((s) => s.reset)
   const runAiTurn = useGameStore((s) => s.runAiTurn)
   const aiPending = useGameStore((s) => s.aiPending)
+  const autoTakeTurns = useGameStore((s) => s.autoTakeTurns)
+  const publicOpinion = useGameStore((s) => s.publicOpinionArticle)
+  const setAutoTakeTurns = useGameStore((s) => s.setAutoTakeTurns)
   const setPolicy = useGameStore((s) => s.setProcurementPolicy)
   const setBurden = useGameStore((s) => s.setProcurementBurden)
   const startProject = useGameStore((s) => s.startProcurement)
   const sendAid = useGameStore((s) => s.sendAidPackage)
   const sendMessage = useGameStore((s) => s.sendDiplomaticMessage)
   const mediatePeace = useGameStore((s) => s.mediatePeace)
+  const requestPeace = useGameStore((s) => s.requestPeace)
   const requestCeasefire = useGameStore((s) => s.requestCeasefire)
   const answerCeasefire = useGameStore((s) => s.respondCeasefire)
 
@@ -111,25 +131,184 @@ export function Sidebar() {
   )
   const responseRequired = incomingCeasefires.length > 0
   const turnLocked = aiPending || responseRequired
+  const opinionDelta = publicOpinion
+    ? publicOpinion.supportDelta > 0 ? `+${publicOpinion.supportDelta}` : String(publicOpinion.supportDelta)
+    : ''
   const canSendDiplomacy = !!selectedDiploTarget && diploMessage.trim().length > 0 && !turnLocked
   const selectedPair = [currentId, selectedDiploTarget].sort().join('|')
   const ceasefireUnavailable =
     (game.ceasefires ?? []).includes(selectedPair) ||
+    peacePairAttemptedThisTurn(game, currentId, selectedDiploTarget) ||
     (game.ceasefireRequests ?? []).some((request) =>
-      (request.from === currentId && request.to === selectedDiploTarget) ||
-      (request.from === selectedDiploTarget && request.to === currentId),
+      pairKey(request.to, request.counterpartId ?? request.from) === selectedPair,
     )
   const mediationPair = [selectedMediateA, selectedMediateB].sort().join('|')
   const mediationUnavailable =
     !selectedMediateA ||
     !selectedMediateB ||
     selectedMediateA === selectedMediateB ||
-    (game.ceasefires ?? []).includes(mediationPair)
+    (game.ceasefires ?? []).includes(mediationPair) ||
+    peacePairAttemptedThisTurn(game, selectedMediateA, selectedMediateB) ||
+    (game.ceasefireRequests ?? []).some((request) =>
+      pairKey(request.to, request.counterpartId ?? request.from) === mediationPair,
+    )
   const mediationText =
     mediateMessage.trim() ||
     diploMessage.trim() ||
     'We ask both governments to accept a mediated pause in hostilities and prevent further escalation.'
   const canMediate = !turnLocked && !mediationUnavailable
+  const peaceReturnOptions = returnableLand(game, currentId).filter((land) => land.to === selectedDiploTarget)
+  const selectedPeaceReturnHexes = peaceReturnOptions
+    .filter((land) => peaceReturnKeys.includes(hexChoiceKey(land.hex)))
+    .map((land) => land.hex)
+  const mediationReturnOptions = selectedMediateA && selectedMediateB
+    ? returnableLand(game, selectedMediateB).filter((land) => land.to === selectedMediateA)
+    : []
+  const selectedMediationReturnHexes = mediationReturnOptions
+    .filter((land) => mediationReturnKeys.includes(hexChoiceKey(land.hex)))
+    .map((land) => land.hex)
+  const [expandedDiplomacy, setExpandedDiplomacy] = useState(false)
+  const handleAutoTakeTurns = (enabled: boolean) => {
+    setAutoTakeTurns(enabled)
+    if (enabled && !turnLocked && current.type !== 'player') {
+      setTimeout(() => { void runAiTurn() }, 0)
+    }
+  }
+
+  const renderReturnChoices = (
+    options: Array<{ hex: Hex; to: string }>,
+    selectedKeys: string[],
+    onToggle: (hex: Hex) => void,
+    label: string,
+  ) => options.length > 0 && (
+    <div className="return-terms">
+      <div className="terms-title">{label}</div>
+      {options.map((land) => {
+        const k = hexChoiceKey(land.hex)
+        return (
+          <label key={k} className="return-row">
+            <input
+              type="checkbox"
+              checked={selectedKeys.includes(k)}
+              onChange={() => onToggle(land.hex)}
+              disabled={turnLocked}
+            />
+            <span>({land.hex.q},{land.hex.r}) to {game.factions[land.to]?.name ?? land.to}</span>
+          </label>
+        )
+      })}
+    </div>
+  )
+
+  const renderDiplomacyControls = () => (
+    <>
+      <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={turnLocked}>
+        {diplomacyTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+      </select>
+      <textarea
+        value={diploMessage}
+        onChange={(event) => setDiploMessage(event.target.value)}
+        placeholder="Diplomatic message, max 3 sentences"
+        maxLength={420}
+        rows={3}
+        disabled={turnLocked}
+      />
+      {renderReturnChoices(
+        peaceReturnOptions,
+        peaceReturnKeys,
+        (hex) => setPeaceReturnKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
+        'Offer returned land',
+      )}
+      <div className="action-row">
+        <button
+          disabled={!canSendDiplomacy}
+          onClick={() => { sendMessage(selectedDiploTarget, diploMessage); setDiploMessage('') }}
+        >Send</button>
+        <button
+          disabled={!canSendDiplomacy || ceasefireUnavailable}
+          onClick={() => { void requestCeasefire(selectedDiploTarget, diploMessage); setDiploMessage('') }}
+        >Ask Ceasefire</button>
+        <button
+          disabled={!canSendDiplomacy || ceasefireUnavailable}
+          onClick={() => {
+            void requestPeace(selectedDiploTarget, diploMessage, selectedPeaceReturnHexes)
+            setDiploMessage('')
+            setPeaceReturnKeys([])
+          }}
+        >Offer Peace</button>
+      </div>
+      <div className="mediation-box">
+        <div className="mediation-row">
+          <select value={selectedMediateA} onChange={(event) => setMediateSideA(event.target.value)} disabled={turnLocked}>
+            {mediationTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <select value={selectedMediateB} onChange={(event) => setMediateSideB(event.target.value)} disabled={turnLocked}>
+            {mediationTargets.filter((f) => f.id !== selectedMediateA).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+        <textarea
+          value={mediateMessage}
+          onChange={(event) => setMediateMessage(event.target.value)}
+          placeholder="Mediation proposal, max 3 sentences"
+          maxLength={420}
+          rows={2}
+          disabled={turnLocked}
+        />
+        {renderReturnChoices(
+          mediationReturnOptions,
+          mediationReturnKeys,
+          (hex) => setMediationReturnKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
+          `${game.factions[selectedMediateB]?.name ?? selectedMediateB} returns land`,
+        )}
+        <button
+          className="ghost full"
+          disabled={!canMediate}
+          onClick={() => {
+            void mediatePeace(selectedMediateA, selectedMediateB, mediationText, selectedMediationReturnHexes)
+            setMediateMessage('')
+            setMediationReturnKeys([])
+            if (!mediateMessage.trim()) setDiploMessage('')
+          }}
+        >Mediate Peace</button>
+      </div>
+    </>
+  )
+
+  const renderIncomingCeasefireModal = () => incomingCeasefires.length > 0 && (
+    <div className="modal-backdrop ceasefire-modal-backdrop">
+      <div className="expanded-window ceasefire-window" role="dialog" aria-modal="true" aria-label="Ceasefire proposal">
+        <div className="modal-head">
+          <h2>Ceasefire Proposal</h2>
+        </div>
+        <div className="expanded-body ceasefire-modal-body">
+          {incomingCeasefires.map((request) => (
+            <div key={request.id} className="ceasefire-request prominent">
+              <strong>{requestTitle(game, request)}</strong>
+              <p>{request.message}</p>
+              <p className="hint flush">
+                {request.kind === 'mediation'
+                  ? 'This peace only takes effect if both named parties accept.'
+                  : 'The proposer has already agreed; your answer decides whether this bilateral ceasefire takes effect.'}
+              </p>
+              {termText(game, request).map((term) => <p key={term} className="hint flush">{term}</p>)}
+              <textarea
+                value={ceasefireReply}
+                onChange={(event) => setCeasefireReply(event.target.value)}
+                placeholder="Response, max 3 sentences"
+                maxLength={420}
+                rows={3}
+                disabled={aiPending}
+              />
+              <div className="action-row">
+                <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, true, ceasefireReply); setCeasefireReply('') }}>Accept</button>
+                <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, false, ceasefireReply); setCeasefireReply('') }}>Reject</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <aside className="sidebar">
@@ -153,6 +332,18 @@ export function Sidebar() {
         </div>
 
       </div>
+
+      {publicOpinion && (
+        <div className="panel opinion-panel">
+          <div className="opinion-kicker">Aurelian Opinion - Round {publicOpinion.turn}</div>
+          <h3>{publicOpinion.headline}</h3>
+          <div className={`opinion-score ${publicOpinion.supportDelta >= 0 ? 'positive' : 'negative'}`}>
+            Support {publicOpinion.supportBefore} to {publicOpinion.supportAfter} ({opinionDelta}) - {publicOpinion.mood}
+          </div>
+          <p>{publicOpinion.article}</p>
+          <p className="opinion-preferred"><strong>Preferred course:</strong> {publicOpinion.preferredCourse}</p>
+        </div>
+      )}
 
       {game.regimeFallen ? (
         <div className="panel gameover">
@@ -232,83 +423,26 @@ export function Sidebar() {
           </div>}
 
           <div className="panel diplomacy-panel">
-            <h2>Diplomacy</h2>
-            {incomingCeasefires.length > 0 && (
-              <div className="ceasefire-inbox">
-                {incomingCeasefires.map((request) => (
-                  <div key={request.id} className="ceasefire-request">
-                    <strong>{requestTitle(game, request)}</strong>
-                    <p>{request.message}</p>
-                    <p className="hint flush">
-                      {request.kind === 'mediation'
-                        ? 'This peace only takes effect if both named parties accept.'
-                        : 'The proposer has already agreed; your answer decides whether this bilateral ceasefire takes effect.'}
-                    </p>
-                    {termText(game, request).map((term) => <p key={term} className="hint flush">{term}</p>)}
-                    <textarea
-                      value={ceasefireReply}
-                      onChange={(event) => setCeasefireReply(event.target.value)}
-                      placeholder="Response, max 3 sentences"
-                      maxLength={420}
-                      rows={2}
-                    />
-                    <div className="action-row">
-                      <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, true, ceasefireReply); setCeasefireReply('') }}>Accept</button>
-                      <button disabled={aiPending} onClick={() => { void answerCeasefire(request.id, false, ceasefireReply); setCeasefireReply('') }}>Reject</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={turnLocked}>
-              {diplomacyTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
-            <textarea
-              value={diploMessage}
-              onChange={(event) => setDiploMessage(event.target.value)}
-              placeholder="Diplomatic message, max 3 sentences"
-              maxLength={420}
-              rows={3}
-              disabled={turnLocked}
-            />
-            <div className="action-row">
-              <button
-                disabled={!canSendDiplomacy}
-                onClick={() => { sendMessage(selectedDiploTarget, diploMessage); setDiploMessage('') }}
-              >Send</button>
-              <button
-                disabled={!canSendDiplomacy || ceasefireUnavailable}
-                onClick={() => { void requestCeasefire(selectedDiploTarget, diploMessage); setDiploMessage('') }}
-              >Ask Ceasefire</button>
+            <div className="panel-header">
+              <h2>Diplomacy</h2>
+              <button className="expand-btn" onClick={() => setExpandedDiplomacy(true)} title="Expand diplomacy" aria-label="Expand diplomacy">□</button>
             </div>
-            <div className="mediation-box">
-              <div className="mediation-row">
-                <select value={selectedMediateA} onChange={(event) => setMediateSideA(event.target.value)} disabled={turnLocked}>
-                  {mediationTargets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                </select>
-                <select value={selectedMediateB} onChange={(event) => setMediateSideB(event.target.value)} disabled={turnLocked}>
-                  {mediationTargets.filter((f) => f.id !== selectedMediateA).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                </select>
-              </div>
-              <textarea
-                value={mediateMessage}
-                onChange={(event) => setMediateMessage(event.target.value)}
-                placeholder="Mediation proposal, max 3 sentences"
-                maxLength={420}
-                rows={2}
-                disabled={turnLocked}
-              />
-              <button
-                className="ghost full"
-                disabled={!canMediate}
-                onClick={() => {
-                  void mediatePeace(selectedMediateA, selectedMediateB, mediationText)
-                  setMediateMessage('')
-                  if (!mediateMessage.trim()) setDiploMessage('')
-                }}
-              >Mediate Peace</button>
-            </div>
+            {renderDiplomacyControls()}
           </div>
+
+          {expandedDiplomacy && (
+            <div className="modal-backdrop" onClick={() => setExpandedDiplomacy(false)}>
+              <div className="expanded-window diplomacy-window" role="dialog" aria-modal="true" aria-label="Expanded diplomacy controls" onClick={(event) => event.stopPropagation()}>
+                <div className="modal-head">
+                  <h2>Diplomacy</h2>
+                  <button className="expand-btn close-btn" onClick={() => setExpandedDiplomacy(false)} title="Close" aria-label="Close expanded window">x</button>
+                </div>
+                <div className="expanded-body diplomacy-panel">
+                  {renderDiplomacyControls()}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="panel">
             <h2>{currentExiled ? 'Government in Exile' : targeting ? 'Choose a target' : selectedBase ? 'Air Base' : 'Selected Force'}</h2>
@@ -352,6 +486,14 @@ export function Sidebar() {
           </div>
 
           <div className="panel actions">
+            <label className="auto-turn-toggle">
+              <input
+                type="checkbox"
+                checked={autoTakeTurns}
+                onChange={(event) => handleAutoTakeTurns(event.target.checked)}
+              />
+              <span>Auto AI turns until Aurelia</span>
+            </label>
             <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={turnLocked}>
               End {current.name}{currentExiled ? ' Exile' : ''} Turn ▸
             </button>
@@ -361,6 +503,7 @@ export function Sidebar() {
           </div>
         </>
       )}
+      {renderIncomingCeasefireModal()}
     </aside>
   )
 }

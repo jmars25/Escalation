@@ -15,12 +15,13 @@ const BASE_INTEGRITY: Record<InstallationType, number> = {
   city: 100, naval_base: 110, army_base: 95, air_base: 90, radar: 55,
 }
 // Force health (HP). Civ-style — strikes/melee chip it over rounds, rarely a one-shot.
+// Marines are a lighter army group: less HP, less power.
 const FORCE_HEALTH: Record<ForceType, number> = {
-  army_group: 40, naval_group: 55, missile_battery: 28,
+  army_group: 40, marine: 30, naval_group: 55, missile_battery: 28,
 }
 // Combat strength (power) for melee rolls. Per-nation army overrides below.
 const FORCE_STRENGTH: Record<ForceType, number> = {
-  army_group: 7, naval_group: 9, missile_battery: 4,
+  army_group: 7, marine: 5, naval_group: 9, missile_battery: 4,
 }
 // Aurelia and Kazrek field markedly stronger armies than everyone else.
 const ARMY_STRENGTH: Record<FactionId, number> = { aurelia: 10, kazrek: 10 }
@@ -397,6 +398,17 @@ export function buildInitialState(): GameState {
   dockNavy('aurelia')
   dockNavy('volkaria')
 
+  // Amphibious marines: only the two great powers field them. One weaker, sea-mobile
+  // marine group each, berthed at the naval base, ready to storm a coast from the strait.
+  for (const factionId of ['aurelia', 'volkaria'] as FactionId[]) {
+    const base = installations.find((i) => i.owner === factionId && i.type === 'naval_base')
+    if (base) forces.push({
+      id: `f${fid++}`, owner: factionId, type: 'marine', hex: base.hex,
+      health: FORCE_HEALTH.marine, maxHealth: FORCE_HEALTH.marine,
+      strength: FORCE_STRENGTH.marine, acted: false,
+    })
+  }
+
   // Extra forces staged at each great power's southern (forward) army base.
   const southernBase = (factionId: FactionId) =>
     installations
@@ -468,5 +480,6 @@ export function buildInitialState(): GameState {
       { turn: 1, kind: 'system', text: 'Crisis begins. Radical Kazrek presses its religious claim to the demilitarized zone on Aurelias shores and masses an army group to march in and seize it.' },
       { turn: 1, kind: 'system', text: 'Backing Kazrek down is hard; doing nothing signals weakness. Aurelia moves first — step each nation through its turn with “End Turn”.' },
     ],
+    supportCrises: [],
   }
 }

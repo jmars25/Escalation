@@ -2,9 +2,10 @@ import express from 'express'
 import cors from 'cors'
 import { summarizeState } from './summarize.ts'
 import { agentRuntimeConfig, runAgentTurn } from './agent.ts'
-import { mediatePeace, proposeCeasefire, respondCeasefire, respondMediation } from '../src/game/engine.ts'
+import { mediatePeace, proposeCeasefire, proposePeace, respondCeasefire, respondMediation } from '../src/game/engine.ts'
 import { runCeasefireResponse, runPeaceDecision } from './agent/diplomacy.ts'
-import type { GameState, FactionId } from '../src/game/types.ts'
+import type { GameState, FactionId, Hex } from '../src/game/types.ts'
+import { runPlayerPublicOpinion } from './agent/publicOpinion.ts'
 
 const app = express()
 const PORT = 3001
@@ -37,6 +38,31 @@ app.post('/api/agent-turn', async (req, res) => {
   }
 })
 
+/** POST /api/player-public-opinion - private Aurelia-only domestic reaction after the player turn.
+ *  Body:    { stateBeforeEnd, stateAfterEnd, factionId }
+ *  Returns: { finalState, article }
+ */
+app.post('/api/player-public-opinion', async (req, res) => {
+  const { stateBeforeEnd, stateAfterEnd, factionId } = req.body as {
+    stateBeforeEnd: GameState
+    stateAfterEnd: GameState
+    factionId: FactionId
+  }
+  if (!stateBeforeEnd || !stateAfterEnd || !factionId) {
+    res.status(400).json({ error: 'stateBeforeEnd, stateAfterEnd, and factionId required' })
+    return
+  }
+  const config = agentRuntimeConfig()
+  if (!config.hasKey) { res.status(500).json({ error: `${config.keyEnv} not set` }); return }
+  try {
+    const result = await runPlayerPublicOpinion(stateBeforeEnd, stateAfterEnd, factionId)
+    res.json(result)
+  } catch (err) {
+    console.error('[player-public-opinion]', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
 /** POST /api/ceasefire-response - ask an AI faction to answer a ceasefire request
  *  Body:    { state, fromId, toId, message }
  *  Returns: { finalState, requestId, response, message, pressStatement }
@@ -61,17 +87,52 @@ app.post('/api/ceasefire-response', async (req, res) => {
   }
 })
 
+/** POST /api/peace-response - ask an AI faction to answer a peace offer with terms
+ *  Body:    { state, fromId, toId, message, returnHexes }
+ *  Returns: { finalState, requestId, response, message, pressStatement }
+ */
+app.post('/api/peace-response', async (req, res) => {
+  const { state, fromId, toId, message, returnHexes } = req.body as {
+    state: GameState
+    fromId: FactionId
+    toId: FactionId
+    message: string
+    returnHexes?: Hex[]
+  }
+  if (!state || !fromId || !toId || typeof message !== 'string') {
+    res.status(400).json({ error: 'state, fromId, toId, and message required' })
+    return
+  }
+  const config = agentRuntimeConfig()
+  if (!config.hasKey) { res.status(500).json({ error: `${config.keyEnv} not set` }); return }
+  try {
+    const proposed = proposePeace(state, fromId, toId, message, Array.isArray(returnHexes) ? returnHexes : [])
+    const request = (proposed.ceasefireRequests ?? []).find((item) =>
+      item.kind === 'peace_offer' &&
+      item.from === fromId &&
+      item.to === toId,
+    )
+    if (!request) { res.status(400).json({ error: 'peace request could not be created' }); return }
+    const result = await runCeasefireResponse(proposed, request.id)
+    res.json({ ...result, requestId: request.id })
+  } catch (err) {
+    console.error('[peace-response]', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
 /** POST /api/mediation-response - ask both AI factions to answer a mediated peace proposal
- *  Body:    { state, mediatorId, sideAId, sideBId, message }
+ *  Body:    { state, mediatorId, sideAId, sideBId, message, returnHexes }
  *  Returns: { finalState, requestId, sideA, sideB }
  */
 app.post('/api/mediation-response', async (req, res) => {
-  const { state, mediatorId, sideAId, sideBId, message } = req.body as {
+  const { state, mediatorId, sideAId, sideBId, message, returnHexes } = req.body as {
     state: GameState
     mediatorId: FactionId
     sideAId: FactionId
     sideBId: FactionId
     message: string
+    returnHexes?: Hex[]
   }
   if (!state || !mediatorId || !sideAId || !sideBId || typeof message !== 'string') {
     res.status(400).json({ error: 'state, mediatorId, sideAId, sideBId, and message required' })
@@ -80,7 +141,7 @@ app.post('/api/mediation-response', async (req, res) => {
   const config = agentRuntimeConfig()
   if (!config.hasKey) { res.status(500).json({ error: `${config.keyEnv} not set` }); return }
   try {
-    const proposed = mediatePeace(state, mediatorId, sideAId, sideBId, message)
+    const proposed = mediatePeace(state, mediatorId, sideAId, sideBId, message, Array.isArray(returnHexes) ? returnHexes : [])
     const request = (proposed.ceasefireRequests ?? []).find((item) =>
       item.kind === 'mediation' &&
       item.from === mediatorId &&

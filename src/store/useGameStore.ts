@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AidPackageType, CeasefireRequest, Force, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
+import type { AidPackageType, CeasefireRequest, Force, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType, PublicOpinionArticle } from '../game/types'
 import { buildInitialState } from '../game/scenario'
 import {
   airBaseTargets, airStrike, canClaim, canStrike, claimHex, currentFactionId, dispatch, endFactionTurn,
@@ -34,8 +34,11 @@ interface GameStore {
   /** Staged trade changes for the acting nation: targetId → desired embargoed state.
    *  Applied only when the player ends the turn. */
   pendingTrade: Record<string, boolean>
+  publicOpinionArticle: PublicOpinionArticle | null
+  autoTakeTurns: boolean
 
   current: () => string
+  setAutoTakeTurns: (enabled: boolean) => void
   beginGame: () => void
   selectForce: (forceId: string | null) => void
   selectInstall: (installId: string | null) => void
@@ -48,13 +51,14 @@ interface GameStore {
   startProcurement: (type: ProcurementProjectType) => void
   sendAidPackage: (targetId: string, type: AidPackageType) => void
   sendDiplomaticMessage: (targetId: string, message: string) => void
-  mediatePeace: (sideAId: string, sideBId: string, message: string) => Promise<void>
+  mediatePeace: (sideAId: string, sideBId: string, message: string, returnHexes?: Hex[]) => Promise<void>
+  requestPeace: (targetId: string, message: string, returnHexes?: Hex[]) => Promise<void>
   requestCeasefire: (targetId: string, message: string) => Promise<void>
   respondCeasefire: (requestId: string, accepted: boolean, message: string) => Promise<void>
   enterStrike: (intensity: StrikeIntensity) => void
   enterAirStrike: (intensity: StrikeIntensity) => void
   cancelAction: () => void
-  endTurn: () => void
+  endTurn: () => Promise<void>
   reset: () => void
   aiPending: boolean
   runAiTurn: () => Promise<void>
@@ -106,6 +110,11 @@ function hasPendingPlayerDiplomacy(game: GameState): boolean {
   return (game.ceasefireRequests ?? []).some((request) => !!playerResponderId(game, request))
 }
 
+function shouldContinueAutoTurns(game: GameState): boolean {
+  if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return false
+  return game.factions[currentFactionId(game)]?.type !== 'player'
+}
+
 export const useGameStore = create<GameStore>()(persist((set, get) => ({
   game: buildInitialState(),
   introPending: true,
@@ -119,8 +128,12 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
   lastAttack: null,
   inspectHex: null,
   pendingTrade: {},
+  publicOpinionArticle: null,
+  autoTakeTurns: false,
 
   current: () => currentFactionId(get().game),
+
+  setAutoTakeTurns: (enabled) => set({ autoTakeTurns: enabled }),
 
   beginGame: () => {
     if (!get().introPending) return
@@ -136,6 +149,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       lastStrike: null,
       lastAttack: next.lastAttack ? { ...next.lastAttack, key: Date.now(), quiet: true } : null,
       pendingTrade: {},
+      publicOpinionArticle: null,
     })
   },
 
@@ -197,7 +211,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     // Move mode: move the selected force first, so friendly stacks don't steal the click.
     if (selectedForceId && moveTargets.some((t) => hexEquals(t, h))) {
       const force = game.forces.find((f) => f.id === selectedForceId)
-      const armyAttack = !!force && force.type === 'army_group' && isHostileAdvance(game, force, h)
+      const armyAttack = !!force && (force.type === 'army_group' || force.type === 'marine') && isHostileAdvance(game, force, h)
       const from = force?.hex ?? h
       const result = moveForce(game, selectedForceId, h)
       if (!armyAttack) sfx.move()
@@ -293,7 +307,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     set({ game: result })
   },
 
-  mediatePeace: async (sideAId, sideBId, message) => {
+  mediatePeace: async (sideAId, sideBId, message, returnHexes = []) => {
     const { game } = get()
     if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
@@ -301,7 +315,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       const res = await fetch('http://localhost:3001/api/mediation-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: game, mediatorId: currentFactionId(game), sideAId, sideBId, message }),
+        body: JSON.stringify({ state: game, mediatorId: currentFactionId(game), sideAId, sideBId, message, returnHexes }),
       })
       if (!res.ok) throw new Error(await res.text())
       const { finalState } = await res.json() as { finalState: typeof game }
@@ -309,6 +323,27 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       set({ game: finalState, pendingTrade: {} })
     } catch (err) {
       console.error('[mediatePeace]', err)
+    } finally {
+      set({ aiPending: false })
+    }
+  },
+
+  requestPeace: async (targetId, message, returnHexes = []) => {
+    const { game } = get()
+    if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
+    set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
+    try {
+      const res = await fetch('http://localhost:3001/api/peace-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message, returnHexes }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { finalState } = await res.json() as { finalState: typeof game; response: 'accepted' | 'rejected'; message: string }
+      sfx.confirm()
+      set({ game: finalState, pendingTrade: {} })
+    } catch (err) {
+      console.error('[requestPeace]', err)
     } finally {
       set({ aiPending: false })
     }
@@ -390,11 +425,12 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
 
   cancelAction: () => set({ mode: 'move', strikeTargets: [] }),
 
-  endTurn: () => {
-    const { game, pendingTrade } = get()
+  endTurn: async () => {
+    const { game, pendingTrade, autoTakeTurns } = get()
     if (game.regimeFallen || hasPendingPlayerDiplomacy(game)) return
     // Commit staged trade changes for the acting nation, then advance.
     const cur = currentFactionId(game)
+    const requestPublicOpinion = cur === 'aurelia' && game.factions[cur]?.type === 'player'
     let g = game
     if (!game.factions[cur]?.exiled) {
       for (const [target, desired] of Object.entries(pendingTrade)) {
@@ -404,15 +440,38 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     const next = endFactionTurn(g)
     sfx.endTurn()
     set({ game: next, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], pendingTrade: {} })
+
+    let finalState = next
+    if (requestPublicOpinion) {
+      set({ aiPending: true })
+      try {
+        const res = await fetch('http://localhost:3001/api/player-public-opinion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stateBeforeEnd: g, stateAfterEnd: next, factionId: cur }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const result = await res.json() as { finalState: GameState; article: PublicOpinionArticle }
+        finalState = result.finalState
+        set({ game: result.finalState, publicOpinionArticle: result.article })
+      } catch (err) {
+        console.error('[playerPublicOpinion]', err)
+      } finally {
+        set({ aiPending: false })
+      }
+    }
+
+    if (autoTakeTurns && shouldContinueAutoTurns(finalState)) setTimeout(() => { void get().runAiTurn() }, 0)
   },
 
-  reset: () => set({ game: buildInitialState(), introPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], lastStrike: null, lastAttack: null, pendingTrade: {} }),
+  reset: () => set({ game: buildInitialState(), introPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [], lastStrike: null, lastAttack: null, pendingTrade: {}, publicOpinionArticle: null }),
 
   aiPending: false,
 
   runAiTurn: async () => {
     const { game } = get()
     if (get().aiPending || hasPendingPlayerDiplomacy(game)) return
+    let continueAutoTurns = false
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
     try {
       const res = await fetch('http://localhost:3001/api/agent-turn', {
@@ -457,6 +516,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       // Apply final state, then play animations sequentially.
       sfx.endTurn()
       set({ game: finalState, pendingTrade: {} })
+      continueAutoTurns = get().autoTakeTurns && shouldContinueAutoTurns(finalState)
 
       const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
       for (const ev of events) {
@@ -472,11 +532,14 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       console.error('[runAiTurn]', err)
     } finally {
       set({ aiPending: false })
+      if (continueAutoTurns && get().autoTakeTurns && shouldContinueAutoTurns(get().game)) {
+        setTimeout(() => { void get().runAiTurn() }, 0)
+      }
     }
   },
 }), {
   name: 'escalation-save',
-  partialize: (s) => ({ game: s.game, pendingTrade: s.pendingTrade, introPending: s.introPending }),
+  partialize: (s) => ({ game: s.game, pendingTrade: s.pendingTrade, introPending: s.introPending, autoTakeTurns: s.autoTakeTurns }),
 }))
 
 // Dev aid: inspect/poke game state from the console (and from preview tooling).

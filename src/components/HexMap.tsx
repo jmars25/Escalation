@@ -10,7 +10,7 @@ const INSTALL_GLYPH: Record<Installation['type'], string> = {
   city: '◉', army_base: '▥', air_base: '✈', naval_base: '⚓', radar: '◎',
 }
 const FORCE_GLYPH: Record<Force['type'], string> = {
-  army_group: '▲', naval_group: '◆', missile_battery: '✸',
+  army_group: '▲', marine: '⛊', naval_group: '⛴', missile_battery: '✸',
 }
 
 const TERRAIN_FILL: Record<Tile['terrain'], string> = {

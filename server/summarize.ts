@@ -3,6 +3,7 @@ import { key, neighbors } from '../src/game/hexUtils.ts'
 
 const FORCE_LABEL: Record<string, string> = {
   army_group: 'Army Group',
+  marine: 'Marines',
   naval_group: 'Naval Group',
   missile_battery: 'Missile Battery',
 }
@@ -25,6 +26,17 @@ function tileDesc(tile: Tile | undefined, factions: GameState['factions']): stri
   if (tile.contested) parts.push('[front line]')
   if (tile.disputedBy) parts.push(`[disputed: ${tile.disputedBy.map((id) => factions[id]?.name ?? id).join(' vs ')}]`)
   return parts.join(' ') || 'unclaimed'
+}
+
+function compactText(text: string, max = 180): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 3)}...`
+}
+
+function currentPeaceAttempts(state: GameState): string[] {
+  return Object.entries(state.peacePairAttemptTurn ?? {})
+    .filter(([, turn]) => turn >= state.turn)
+    .map(([pair]) => pair.split('|').map((id) => state.factions[id]?.name ?? id).join(' - '))
 }
 
 export function recentCoalitionPressureOnKazrek(state: GameState): GameState['log'] {
@@ -60,29 +72,31 @@ export function summarizeState(state: GameState, factionId: FactionId): string {
     lines.push('  You have no military, procurement, trade, aid, or territorial control actions. Use statements, messages, ceasefire or peace proposals, and mediation.')
     lines.push('')
 
-    const ceasefires = state.ceasefires ?? []
-    const pendingCeasefires = state.ceasefireRequests ?? []
-    const recentMessages = (state.diplomaticMessages ?? []).slice(0, 8)
-    if (ceasefires.length > 0 || pendingCeasefires.length > 0 || recentMessages.length > 0) {
+    const ceasefires = (state.ceasefires ?? []).slice(0, 6)
+    const pendingCeasefires = (state.ceasefireRequests ?? []).slice(0, 4)
+    const recentMessages = (state.diplomaticMessages ?? []).slice(0, 5)
+    const peaceAttempts = currentPeaceAttempts(state)
+    if (ceasefires.length > 0 || pendingCeasefires.length > 0 || recentMessages.length > 0 || peaceAttempts.length > 0) {
       lines.push('DIPLOMACY:')
       for (const pair of ceasefires) {
         const [a, b] = pair.split('|')
         lines.push(`  Ceasefire active: ${state.factions[a]?.name ?? a} and ${state.factions[b]?.name ?? b}.`)
       }
       for (const request of pendingCeasefires) {
-        lines.push(`  Pending ceasefire: ${state.factions[request.from]?.name ?? request.from} asks ${state.factions[request.to]?.name ?? request.to}: "${request.message}"`)
+        lines.push(`  Pending ceasefire: ${state.factions[request.from]?.name ?? request.from} asks ${state.factions[request.to]?.name ?? request.to}: "${compactText(request.message, 140)}"`)
       }
       for (const msg of recentMessages) {
         const response = msg.response ? ` (${msg.response})` : ''
-        lines.push(`  [Round ${msg.turn}] ${state.factions[msg.from]?.name ?? msg.from} -> ${state.factions[msg.to]?.name ?? msg.to}${response}: "${msg.message}"`)
+        lines.push(`  [Round ${msg.turn}] ${state.factions[msg.from]?.name ?? msg.from} -> ${state.factions[msg.to]?.name ?? msg.to}${response}: "${compactText(msg.message, 140)}"`)
       }
+      if (peaceAttempts.length > 0) lines.push(`  Peace/ceasefire already raised this round: ${peaceAttempts.join('; ')}. Do not re-propose those pairs this round.`)
       lines.push('')
     }
 
-    const recentEvents = state.log.slice(0, 8)
+    const recentEvents = state.log.slice(0, 5)
     if (recentEvents.length > 0) {
       lines.push('RECENT ACTIONS TO RESPOND TO:')
-      for (const e of recentEvents) lines.push(`  [Round ${e.turn}] ${e.text}`)
+      for (const e of recentEvents) lines.push(`  [Round ${e.turn}] ${compactText(e.text)}`)
       lines.push('')
     }
 
@@ -186,34 +200,36 @@ export function summarizeState(state: GameState, factionId: FactionId): string {
   }
 
   // --- Diplomacy ---
-  const ceasefires = state.ceasefires ?? []
-  const pendingCeasefires = state.ceasefireRequests ?? []
-  const recentMessages = (state.diplomaticMessages ?? []).slice(0, 6)
-  if (ceasefires.length > 0 || pendingCeasefires.length > 0 || recentMessages.length > 0) {
+  const ceasefires = (state.ceasefires ?? []).slice(0, 6)
+  const pendingCeasefires = (state.ceasefireRequests ?? []).slice(0, 4)
+  const recentMessages = (state.diplomaticMessages ?? []).slice(0, 4)
+  const peaceAttempts = currentPeaceAttempts(state)
+  if (ceasefires.length > 0 || pendingCeasefires.length > 0 || recentMessages.length > 0 || peaceAttempts.length > 0) {
     lines.push('DIPLOMACY:')
     for (const pair of ceasefires) {
       const [a, b] = pair.split('|')
       lines.push(`  Ceasefire active: ${state.factions[a]?.name ?? a} and ${state.factions[b]?.name ?? b}. Hostile moves and strikes between them are prohibited.`)
     }
     for (const request of pendingCeasefires) {
-      lines.push(`  Pending ceasefire: ${state.factions[request.from]?.name ?? request.from} asks ${state.factions[request.to]?.name ?? request.to}: "${request.message}"`)
+      lines.push(`  Pending ceasefire: ${state.factions[request.from]?.name ?? request.from} asks ${state.factions[request.to]?.name ?? request.to}: "${compactText(request.message, 140)}"`)
     }
     for (const msg of recentMessages) {
       const response = msg.response ? ` (${msg.response})` : ''
-      lines.push(`  [Round ${msg.turn}] ${state.factions[msg.from]?.name ?? msg.from} -> ${state.factions[msg.to]?.name ?? msg.to}${response}: "${msg.message}"`)
+      lines.push(`  [Round ${msg.turn}] ${state.factions[msg.from]?.name ?? msg.from} -> ${state.factions[msg.to]?.name ?? msg.to}${response}: "${compactText(msg.message, 140)}"`)
     }
+    if (peaceAttempts.length > 0) lines.push(`  Peace/ceasefire already raised this round: ${peaceAttempts.join('; ')}. Do not re-propose those pairs this round.`)
     lines.push('')
   }
 
   // --- Recent events ---
   const recentCombat = state.log
     .filter((e) => e.kind !== 'system' || e.text.match(/assault|strike|sunk|repel|seize|claim|fleet/i))
-    .slice(0, 8)
+    .slice(0, 5)
   if (recentCombat.length > 0) {
     lines.push('RECENT ACTIONS TO RESPOND TO:')
     lines.push('  Decision question: Given what just happened, should a realistic government answer with force, pressure, support to allies, diplomacy, or restraint to fulfill its mandate and red lines?')
     for (const e of recentCombat) {
-      lines.push(`  [Round ${e.turn}] ${e.text}`)
+      lines.push(`  [Round ${e.turn}] ${compactText(e.text)}`)
     }
     lines.push('')
   }

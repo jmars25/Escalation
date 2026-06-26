@@ -7,6 +7,7 @@ import type { AgentTool } from './types.ts'
 
 const FORCE_LABEL: Record<string, string> = {
   army_group: 'Army Group',
+  marine: 'Marines',
   naval_group: 'Naval Group',
   missile_battery: 'Missile Battery',
 }
@@ -22,14 +23,14 @@ const INSTALL_LABEL: Record<string, string> = {
 export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'move_force',
-    description: 'Move or deploy a force to a hex. Entering land you do not own is an act of war.',
+    description: 'Move/deploy a force. Foreign land entry is war.',
     input_schema: {
       type: 'object',
       properties: {
-        forceId: { type: 'string', description: 'The ID of the force to move (e.g. "f3")' },
+        forceId: { type: 'string', description: 'Force id' },
         to: {
           type: 'object',
-          description: 'Destination hex coordinates',
+          description: 'Hex',
           properties: { q: { type: 'number' }, r: { type: 'number' } },
           required: ['q', 'r'],
         },
@@ -39,43 +40,43 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'claim_hex',
-    description: 'Claim the hex the force is currently standing on. Taking territory causes major diplomatic harm.',
+    description: 'Claim current hex. Major diplomatic harm.',
     input_schema: {
       type: 'object',
       properties: {
-        forceId: { type: 'string', description: 'The ID of the force claiming the hex' },
+        forceId: { type: 'string', description: 'Force id' },
       },
       required: ['forceId'],
     },
   },
   {
     name: 'force_strike',
-    description: 'Launch a missile or naval strike at a target hex.',
+    description: 'Missile/naval strike.',
     input_schema: {
       type: 'object',
       properties: {
-        forceId: { type: 'string', description: 'The force launching the strike' },
+        forceId: { type: 'string', description: 'Force id' },
         target: {
           type: 'object',
-          description: 'Target hex',
+          description: 'Hex',
           properties: { q: { type: 'number' }, r: { type: 'number' } },
           required: ['q', 'r'],
         },
-        intensity: { type: 'string', enum: ['limited', 'full'], description: 'limited = 1 charge, full = 2 charges' },
+        intensity: { type: 'string', enum: ['limited', 'full'], description: 'limited=1 charge, full=2' },
       },
       required: ['forceId', 'target', 'intensity'],
     },
   },
   {
     name: 'air_strike',
-    description: 'Launch an air strike from an air base.',
+    description: 'Air strike from base.',
     input_schema: {
       type: 'object',
       properties: {
-        baseId: { type: 'string', description: 'The air base installation ID' },
+        baseId: { type: 'string', description: 'Air base id' },
         target: {
           type: 'object',
-          description: 'Target hex',
+          description: 'Hex',
           properties: { q: { type: 'number' }, r: { type: 'number' } },
           required: ['q', 'r'],
         },
@@ -86,13 +87,13 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'toggle_trade',
-    description: 'Embargo or restore trade with another nation. Embargo is a common response to aggression: stronger than a warning, but short of military action.',
+    description: 'Embargo/restore trade. Pressure short of war.',
     input_schema: {
       type: 'object',
       properties: {
         targetId: {
           type: 'string',
-          description: 'The faction ID to embargo or restore trade with.',
+          description: 'Faction id',
         },
       },
       required: ['targetId'],
@@ -100,7 +101,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'set_procurement_policy',
-    description: 'Set national procurement policy. Draft accelerates armies but harms support; contracts/emergency support hardware.',
+    description: 'Set procurement policy.',
     input_schema: {
       type: 'object',
       properties: {
@@ -111,7 +112,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'set_procurement_burden',
-    description: 'Set procurement burden. Higher burden builds faster but hurts economy/support.',
+    description: 'Set build burden. Higher is faster but costly.',
     input_schema: {
       type: 'object',
       properties: {
@@ -122,7 +123,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'start_procurement',
-    description: 'Start or switch the active procurement project.',
+    description: 'Start/switch procurement project.',
     input_schema: {
       type: 'object',
       properties: {
@@ -133,11 +134,11 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'send_aid',
-    description: 'Send economic or arms aid to an ally. Aid costs you, helps the ally, and accelerates their procurement.',
+    description: 'Send economic/arms aid to ally.',
     input_schema: {
       type: 'object',
       properties: {
-        targetId: { type: 'string', description: 'Allied faction ID receiving aid.' },
+        targetId: { type: 'string', description: 'Ally id' },
         aidType: { type: 'string', enum: ['economic', 'arms'] },
       },
       required: ['targetId', 'aidType'],
@@ -145,39 +146,39 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'send_message',
-    description: 'Send a diplomatic message to another nation without changing treaties or trade. Keep it under 3 sentences.',
+    description: 'Send diplomatic note, max 3 sentences.',
     input_schema: {
       type: 'object',
       properties: {
-        targetId: { type: 'string', description: 'Faction ID receiving the message.' },
-        message: { type: 'string', description: 'Short diplomatic message, maximum 3 sentences.', maxLength: 420 },
+        targetId: { type: 'string', description: 'Faction id' },
+        message: { type: 'string', description: 'Message', maxLength: 420 },
       },
       required: ['targetId', 'message'],
     },
   },
   {
     name: 'propose_ceasefire',
-    description: 'Ask another nation for a bilateral ceasefire. If accepted, hostile moves and strikes between the pair are prohibited.',
+    description: 'Ask for bilateral ceasefire.',
     input_schema: {
       type: 'object',
       properties: {
-        targetId: { type: 'string', description: 'Faction ID receiving the ceasefire request.' },
-        message: { type: 'string', description: 'Reasoned ceasefire proposal.', maxLength: 420 },
+        targetId: { type: 'string', description: 'Faction id' },
+        message: { type: 'string', description: 'Proposal', maxLength: 420 },
       },
       required: ['targetId', 'message'],
     },
   },
   {
     name: 'propose_peace',
-    description: 'Offer a peace settlement to another nation. Can include returning captured land; if accepted, it creates a ceasefire.',
+    description: 'Offer peace; optional returned land.',
     input_schema: {
       type: 'object',
       properties: {
-        targetId: { type: 'string', description: 'Faction ID receiving the peace offer.' },
-        message: { type: 'string', description: 'Short peace offer, maximum 3 sentences.', maxLength: 420 },
+        targetId: { type: 'string', description: 'Faction id' },
+        message: { type: 'string', description: 'Offer', maxLength: 420 },
         returnHexes: {
           type: 'array',
-          description: 'Optional captured hexes you offer to return.',
+          description: 'Hexes to return',
           items: {
             type: 'object',
             properties: { q: { type: 'number' }, r: { type: 'number' } },
@@ -190,16 +191,16 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'mediate_peace',
-    description: 'Ask one nation to accept a mediated peace with another nation. If accepted, the two sides enter a ceasefire.',
+    description: 'Mediate peace between two sides.',
     input_schema: {
       type: 'object',
       properties: {
-        sideAId: { type: 'string', description: 'Faction ID receiving the mediation offer.' },
-        sideBId: { type: 'string', description: 'Other faction the ceasefire would bind.' },
-        message: { type: 'string', description: 'Short mediation message, maximum 3 sentences.', maxLength: 420 },
+        sideAId: { type: 'string', description: 'Faction id' },
+        sideBId: { type: 'string', description: 'Faction id' },
+        message: { type: 'string', description: 'Proposal', maxLength: 420 },
         returnHexes: {
           type: 'array',
-          description: 'Optional hexes sideB would return to sideA if accepted.',
+          description: 'Hexes sideB returns',
           items: {
             type: 'object',
             properties: { q: { type: 'number' }, r: { type: 'number' } },
@@ -212,43 +213,43 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'return_land',
-    description: 'Unilaterally return captured land to its prior owner as a diplomatic de-escalation.',
+    description: 'Return captured land.',
     input_schema: {
       type: 'object',
       properties: {
         hex: {
           type: 'object',
-          description: 'Captured hex to return.',
+          description: 'Hex',
           properties: { q: { type: 'number' }, r: { type: 'number' } },
           required: ['q', 'r'],
         },
-        toId: { type: 'string', description: 'Faction ID receiving the returned land.' },
+        toId: { type: 'string', description: 'Faction id' },
       },
       required: ['hex', 'toId'],
     },
   },
   {
     name: 'respond_ceasefire',
-    description: 'Accept or reject a pending ceasefire request. Pending ceasefire requests must be answered before other actions.',
+    description: 'Accept/reject pending ceasefire first.',
     input_schema: {
       type: 'object',
       properties: {
-        requestId: { type: 'string', description: 'Pending ceasefire request ID.' },
+        requestId: { type: 'string', description: 'Request id' },
         response: { type: 'string', enum: ['accepted', 'rejected'] },
-        message: { type: 'string', description: 'Short explanation of the response.', maxLength: 420 },
+        message: { type: 'string', description: 'Explanation', maxLength: 420 },
       },
       required: ['requestId', 'response', 'message'],
     },
   },
   {
     name: 'end_turn',
-    description: 'Finish your turn. Include a short public press statement explaining your actions.',
+    description: 'Finish turn with public statement.',
     input_schema: {
       type: 'object',
       properties: {
         pressStatement: {
           type: 'string',
-          description: 'A public press statement, maximum 3 sentences, explaining why your government took this turn.',
+          description: 'Max 3 sentences',
           maxLength: 420,
         },
       },
@@ -263,10 +264,10 @@ export function buildSystemPrompt(state: GameState, factionId: FactionId): strin
   const available = availableActions(state)
 
   // Condense the action list so the model sees legal choices without a giant JSON blob.
-  const movesByForce: Record<string, string[]> = {}
+  const movesByForce: Record<string, Record<string, string[]>> = {}
   const claimActions: string[] = []
-  const strikesByForce: string[] = []
-  const airStrikes: string[] = []
+  const strikesByForce = new Map<string, { label: string; intensities: Set<string> }>()
+  const airStrikes = new Map<string, { label: string; intensities: Set<string> }>()
   const tradeActions: string[] = []
   const procurementActions: string[] = []
   const aidActions: string[] = []
@@ -280,13 +281,16 @@ export function buildSystemPrompt(state: GameState, factionId: FactionId): strin
 
   for (const action of available) {
     if (action.type === 'move_force') {
-      ;(movesByForce[action.forceId] ??= []).push(`${hexLabel(action.to)} ${actionContext(state, factionId, action)}`)
+      const context = moveDestinationGroupLabel(state, factionId, action)
+      ;((movesByForce[action.forceId] ??= {})[context] ??= []).push(hexLabel(action.to))
     } else if (action.type === 'claim_hex') {
       claimActions.push(claimActionLabel(state, factionId, action.forceId))
     } else if (action.type === 'force_strike') {
-      strikesByForce.push(`${actorLabel(state, action.forceId)} -> ${hexLabel(action.target)} [${action.intensity}] ${actionContext(state, factionId, action)}`)
+      const label = `${actorLabel(state, action.forceId)}>${hexLabel(action.target)} ${actionContext(state, factionId, action)}`
+      ;(strikesByForce.get(label) ?? strikesByForce.set(label, { label, intensities: new Set() }).get(label)!).intensities.add(action.intensity)
     } else if (action.type === 'air_strike') {
-      airStrikes.push(`${installationLabel(state, action.baseId)} -> ${hexLabel(action.target)} [${action.intensity}] ${actionContext(state, factionId, action)}`)
+      const label = `${installationLabel(state, action.baseId)}>${hexLabel(action.target)} ${actionContext(state, factionId, action)}`
+      ;(airStrikes.get(label) ?? airStrikes.set(label, { label, intensities: new Set() }).get(label)!).intensities.add(action.intensity)
     } else if (action.type === 'toggle_trade') {
       tradeActions.push(tradeActionLabel(state, factionId, action.targetId))
     } else if (action.type === 'set_procurement_policy' || action.type === 'set_procurement_burden' || action.type === 'start_procurement') {
@@ -312,11 +316,13 @@ export function buildSystemPrompt(state: GameState, factionId: FactionId): strin
   }
 
   const actionLines: string[] = []
-  for (const [forceId, dests] of Object.entries(movesByForce))
+  for (const [forceId, groups] of Object.entries(movesByForce)) {
+    const dests = Object.entries(groups).map(([label, hexes]) => `${label}=[${hexes.join(' ')}]`)
     actionLines.push(`  move_force ${actorLabel(state, forceId)}: ${dests.join('; ')}`)
+  }
   for (const claim of claimActions) actionLines.push(`  claim_hex ${claim}`)
-  for (const strike of strikesByForce) actionLines.push(`  force_strike ${strike}`)
-  for (const strike of airStrikes) actionLines.push(`  air_strike ${strike}`)
+  for (const strike of strikesByForce.values()) actionLines.push(`  force_strike ${strike.label} modes=[${[...strike.intensities].join('/')}]`)
+  for (const strike of airStrikes.values()) actionLines.push(`  air_strike ${strike.label} modes=[${[...strike.intensities].join('/')}]`)
   if (tradeActions.length) actionLines.push(`  toggle_trade targets: [${tradeActions.join('; ')}]`)
   if (procurementActions.length) actionLines.push(`  procurement options: [${[...new Set(procurementActions)].join(', ')}]`)
   if (aidActions.length) actionLines.push(`  send_aid options: [${aidActions.join('; ')}]`)
@@ -324,7 +330,7 @@ export function buildSystemPrompt(state: GameState, factionId: FactionId): strin
   if (messageTargets.length) diplomacyParts.push(`send_message targets=[${messageTargets.join(', ')}]`)
   if (ceasefireTargets.length) diplomacyParts.push(`propose_ceasefire targets=[${ceasefireTargets.join(', ')}]`)
   if (peaceTargets.length) diplomacyParts.push(`propose_peace targets=[${peaceTargets.join(', ')}] returnHexes optional`)
-  if (mediationTargets.size) diplomacyParts.push(`mediate_peace side ids=[${[...mediationTargets].join(', ')}] choose sideAId and sideBId`)
+  if (mediationTargets.size) diplomacyParts.push(`mediate_peace sides=[${[...mediationTargets].join(', ')}]`)
   if (responseActions.length) diplomacyParts.push(`respond=[${responseActions.join('; ')}]`)
   if (diplomacyParts.length) actionLines.push(`  diplomacy options: ${diplomacyParts.join('; ')}`)
   if (returnLandActions.length) actionLines.push(`  return_land options: [${returnLandActions.join('; ')}]`)
@@ -399,6 +405,34 @@ function actionContext(state: GameState, factionId: FactionId, action: Action): 
   }
 }
 
+function moveDestinationGroupLabel(state: GameState, factionId: FactionId, action: Extract<Action, { type: 'move_force' }>): string {
+  const tile = state.tiles[key(action.to)]
+  if (!tile) return 'unknown'
+
+  const parts: string[] = []
+  if (!tile.owner) {
+    parts.push('unclaimed')
+  } else if (tile.owner === factionId) {
+    parts.push('own')
+  } else {
+    const actor = state.factions[factionId]
+    const owner = state.factions[tile.owner]
+    const relation = owner?.alignment === 'neutral'
+      ? 'neutral'
+      : owner?.alignment === actor?.alignment
+        ? 'ally'
+        : 'opp'
+    parts.push(relation)
+    if (shouldWarnArmyEntry(state, action)) parts.push('war-entry')
+  }
+  if (tile.terrain !== 'plains') parts.push(tile.terrain)
+  if (tile.dmz) parts.push('dmz')
+  if (tile.contested) parts.push('front')
+  if (tile.disputedBy?.length) parts.push(`disputed:${tile.disputedBy.join('/')}`)
+
+  return parts.join('+')
+}
+
 function horizontalEscalationNote(
   state: GameState,
   factionId: FactionId,
@@ -434,7 +468,7 @@ function tileContext(state: GameState, factionId: FactionId, hex: Hex, warnArmyE
 
 function shouldWarnArmyEntry(state: GameState, action: Extract<Action, { type: 'move_force' }>): boolean {
   const force = state.forces.find((candidate) => candidate.id === action.forceId)
-  return force?.type === 'army_group'
+  return force?.type === 'army_group' || force?.type === 'marine'
 }
 
 function ownershipContext(state: GameState, factionId: FactionId, ownerId: FactionId | null): string {
@@ -445,12 +479,12 @@ function ownershipContext(state: GameState, factionId: FactionId, ownerId: Facti
   if (!owner || !actor) return ownerId
 
   const relation =
-    owner.id === factionId ? 'own territory'
+    owner.id === factionId ? 'own'
     : owner.alignment === 'neutral' ? 'neutral'
     : owner.alignment === actor.alignment ? 'ally'
-    : 'opposing alignment'
+    : 'opp'
 
-  return `${owner.name} ${relation} (${owner.alignment}, support ${owner.support}, economy ${owner.market})`
+  return `${owner.id} ${relation} S${owner.support} E${owner.market}`
 }
 
 function targetContents(state: GameState, factionId: FactionId, hex: Hex): string {
@@ -460,28 +494,47 @@ function targetContents(state: GameState, factionId: FactionId, hex: Hex): strin
   for (const inst of installationsAt(state, hex)) {
     const owner = state.factions[inst.owner]
     const warning = inst.type === 'city' ? ', city strike causes major diplomatic harm' : ''
-    contents.push(`${owner?.name ?? inst.owner} ${INSTALL_LABEL[inst.type] ?? inst.type} integrity ${inst.integrity}${warning}`)
+    contents.push(`${owner?.id ?? inst.owner} ${installTypeToken(inst.type)} int${inst.integrity}${warning}`)
   }
 
   for (const force of forcesAtHex(state, hex)) {
     const owner = state.factions[force.owner]
-    const relation = owner?.alignment === actor?.alignment ? 'same alignment' : owner?.alignment === 'neutral' ? 'neutral' : 'opposing alignment'
-    contents.push(`${owner?.name ?? force.owner} ${FORCE_LABEL[force.type] ?? force.type} ${force.health}/${force.maxHealth} HP, ${relation}`)
+    const relation = owner?.alignment === actor?.alignment ? 'same-align' : owner?.alignment === 'neutral' ? 'neutral' : 'opp'
+    contents.push(`${owner?.id ?? force.owner} ${forceTypeToken(force.type)} ${force.health}/${force.maxHealth}, ${relation}`)
   }
 
   return contents.length ? `visible contents: ${contents.join('; ')}` : 'no visible force or installation on target'
 }
 
+function forceTypeToken(type: Force['type']): string {
+  switch (type) {
+    case 'army_group': return 'army'
+    case 'marine': return 'marine'
+    case 'naval_group': return 'navy'
+    case 'missile_battery': return 'missile'
+    default: return type
+  }
+}
+
+function installTypeToken(type: Installation['type']): string {
+  switch (type) {
+    case 'army_base': return 'army_base'
+    case 'air_base': return 'air_base'
+    case 'naval_base': return 'naval_base'
+    default: return type
+  }
+}
+
 function actorLabel(state: GameState, forceId: string): string {
   const force = state.forces.find((candidate) => candidate.id === forceId)
   if (!force) return forceId
-  return `${forceId} ${FORCE_LABEL[force.type] ?? force.type} at ${hexLabel(force.hex)}`
+  return `${forceId}:${forceTypeToken(force.type)}@${hexLabel(force.hex)}`
 }
 
 function installationLabel(state: GameState, installId: string): string {
   const inst = state.installations.find((candidate) => candidate.id === installId)
   if (!inst) return installId
-  return `${installId} ${INSTALL_LABEL[inst.type] ?? inst.type} at ${hexLabel(inst.hex)}`
+  return `${installId}:${installTypeToken(inst.type)}@${hexLabel(inst.hex)}`
 }
 
 function claimActionLabel(state: GameState, factionId: FactionId, forceId: string): string {
@@ -564,7 +617,7 @@ function tradeActionLabel(state: GameState, factionId: FactionId, targetId: Fact
 }
 
 function targetToken(state: GameState, targetId: FactionId): string {
-  return `${targetId}=${state.factions[targetId]?.name ?? targetId}`
+  return state.factions[targetId] ? targetId : String(targetId)
 }
 
 function forcesAtHex(state: GameState, hex: Hex): Force[] {
