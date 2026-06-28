@@ -107,7 +107,9 @@ function buildCeasefirePrompt(state: GameState, fromId: FactionId, toId: Faction
         ? `a peace offer from ${requester.name}`
         : `a ceasefire request from ${requester.name}`
   const terms = request?.terms?.length
-    ? `\nOFFERED TERMS:\n${request.terms.map((term) => `  return (${term.hex.q},${term.hex.r}) from ${state.factions[term.from]?.name ?? term.from} to ${state.factions[term.to]?.name ?? term.to}`).join('\n')}\n`
+    ? `\nOFFERED TERMS:\n${request.terms.map((term) => term.type === 'return_land'
+        ? `  return (${term.hex.q},${term.hex.r}) from ${state.factions[term.from]?.name ?? term.from} to ${state.factions[term.to]?.name ?? term.to}`
+        : `  ${state.factions[term.from]?.name ?? term.from} pulls back from (${term.hex.q},${term.hex.r}), restoring it to contested status`).join('\n')}\n`
     : ''
   return `You are ${responder.name} deciding whether to accept ${requestLabel}.
 

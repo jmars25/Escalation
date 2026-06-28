@@ -247,10 +247,52 @@ const TILES: TileDef[] = [
   { q: 6,  r: 10, sea: true },
 ]
 
-export function buildInitialState(): GameState {
-  const defs: Record<FactionId, FactionDef> = {}
-  for (const f of FACTIONS) defs[f.id] = f
+// Shared scratch state threaded through the build phases. `nextInstId`/`nextForceId`
+// hand out the sequential i0/i1.. and f0/f1.. ids, so phase order is what fixes ids.
+type Build = {
+  tiles: Record<string, Tile>
+  factions: Record<FactionId, Faction>
+  ownedBy: Record<FactionId, Hex[]>
+  installations: Installation[]
+  forces: Force[]
+  nextInstId: () => string
+  nextForceId: () => string
+}
 
+function makeIdGen(prefix: string): () => string {
+  let n = 0
+  return () => `${prefix}${n++}`
+}
+
+const isMajorPower = (f: FactionDef) => f.type === 'player' || f.type === 'rival'
+const seaAdjacent = (tiles: Build['tiles'], h: Hex) =>
+  neighbors(h).some((n) => tiles[key(n)]?.terrain === 'sea')
+
+// Per-nation army override (Aurelia/Kazrek hit harder); everything else by type.
+function forceStrength(type: ForceType, factionId: FactionId): number {
+  return type === 'army_group'
+    ? (ARMY_STRENGTH[factionId] ?? FORCE_STRENGTH.army_group)
+    : FORCE_STRENGTH[type]
+}
+
+function makeInstallation(b: Build, owner: FactionId, type: InstallationType, hex: Hex): Installation {
+  const inst: Installation = { id: b.nextInstId(), owner, type, hex, integrity: BASE_INTEGRITY[type] }
+  if (type === 'air_base') { inst.charges = 2; inst.maxCharges = 2 }
+  return inst
+}
+
+// Strike platforms (missile/naval) carry 2 charges.
+function makeForce(b: Build, owner: FactionId, type: ForceType, hex: Hex): Force {
+  const fc: Force = {
+    id: b.nextForceId(), owner, type, hex,
+    health: FORCE_HEALTH[type], maxHealth: FORCE_HEALTH[type],
+    strength: forceStrength(type, owner), acted: false,
+  }
+  if (type === 'missile_battery' || type === 'naval_group') { fc.charges = 2; fc.maxCharges = 2 }
+  return fc
+}
+
+function buildTiles(): Record<string, Tile> {
   const tiles: Record<string, Tile> = {}
   for (const def of TILES) {
     const hex = { q: def.q, r: def.r }
@@ -264,114 +306,116 @@ export function buildInitialState(): GameState {
       strait: def.strait ?? false,
     }
   }
+  return tiles
+}
 
-  // Derive each faction's capital: the most central tile it owns.
+function ownershipByFaction(tiles: Record<string, Tile>): Record<FactionId, Hex[]> {
   const ownedBy: Record<FactionId, Hex[]> = {}
   for (const t of Object.values(tiles)) {
     if (t.owner) (ownedBy[t.owner] ??= []).push(t.hex)
   }
+  return ownedBy
+}
+
+// A faction's capital is the most central tile it owns (minimum total distance to its
+// other tiles).
+function centralCapital(owned: Hex[]): Hex {
+  return owned.reduce(
+    (best, h) => {
+      const score = owned.reduce((s, o) => s + distance(h, o), 0)
+      return score < best.score ? { hex: h, score } : best
+    },
+    { hex: owned[0] ?? { q: 0, r: 0 }, score: Infinity },
+  ).hex
+}
+
+function buildFactions(ownedBy: Record<FactionId, Hex[]>): Record<FactionId, Faction> {
   const factions: Record<FactionId, Faction> = {}
   for (const f of FACTIONS) {
-    const isMajor = f.type === 'player' || f.type === 'rival'
-    const owned = ownedBy[f.id] ?? []
-    const capital = owned.reduce(
-      (best, h) => {
-        const score = owned.reduce((s, o) => s + distance(h, o), 0)
-        return score < best.score ? { hex: h, score } : best
-      },
-      { hex: owned[0] ?? { q: 0, r: 0 }, score: Infinity },
-    ).hex
     // Trade weight = economic size: big powers (3 cities) are worth far more as a
     // trade partner than small nations (1 city). Market starts at 100 (all trade open,
     // cities intact) and tracks city integrity + open trade thereafter.
-    const cityCount = isMajor ? 3 : 1
     factions[f.id] = {
       ...f,
-      capital,
+      capital: centralCapital(ownedBy[f.id] ?? []),
       market: 100,
-      tradeWeight: isMajor ? 6 : cityCount + 1,
+      tradeWeight: isMajorPower(f) ? 6 : 2,
       procurement: { policy: 'civilian', burden: 'standard', aidBoost: 0, aidBoostTurns: 0 },
     }
   }
+  return factions
+}
 
-  // --- Place installations and starting forces ---
-  const installations: Installation[] = []
-  const forces: Force[] = []
-  let iid = 0
-  let fid = 0
-  const seaAdjacentTo = (h: Hex) => neighbors(h).some((n) => tiles[key(n)]?.terrain === 'sea')
-
-  for (const f of FACTIONS) {
-    const cap = factions[f.id].capital
-    // Owned plains tiles, capital first, then nearest-out.
-    const owned = (ownedBy[f.id] ?? [])
-      .filter((h) => tiles[key(h)]?.terrain === 'plains')
-      .sort((a, b) => distance(a, cap) - distance(b, cap))
-    const seaForward = [...new Set(
-      owned.flatMap((h) => neighbors(h).filter((n) => tiles[key(n)]?.terrain === 'sea').map(key)),
-    )].map((k) => tiles[k].hex)
-
-    const isMajor = f.type === 'player' || f.type === 'rival'
-    const isNeutral = f.type === 'neutral'
-
-    // Cities: capital first, then spread out via farthest-point dispersion so a
-    // nation's cities aren't clustered. Great powers get 3, everyone else 1.
-    const cityCount = isMajor ? 3 : 1
-    const cityHexes: Hex[] = owned.length ? [owned[0]] : []
-    const usedForCity = new Set(cityHexes.map(key))
-    while (cityHexes.length < cityCount && usedForCity.size < owned.length) {
-      let best: Hex | undefined
-      let bestD = -1
-      for (const h of owned) {
-        if (usedForCity.has(key(h))) continue
-        const d = Math.min(...cityHexes.map((c) => distance(c, h)))
-        if (d > bestD) { bestD = d; best = h }
-      }
-      if (!best) break
-      cityHexes.push(best)
-      usedForCity.add(key(best))
+// Cities: capital first, then spread out via farthest-point dispersion so a nation's
+// cities aren't clustered. Great powers get 3, everyone else 1.
+function dispersedCityHexes(owned: Hex[], cityCount: number): Hex[] {
+  const cityHexes: Hex[] = owned.length ? [owned[0]] : []
+  const used = new Set(cityHexes.map(key))
+  while (cityHexes.length < cityCount && used.size < owned.length) {
+    let best: Hex | undefined
+    let bestD = -1
+    for (const h of owned) {
+      if (used.has(key(h))) continue
+      const d = Math.min(...cityHexes.map((c) => distance(c, h)))
+      if (d > bestD) { bestD = d; best = h }
     }
-    for (const h of cityHexes) {
-      installations.push({ id: `i${iid++}`, owner: f.id, type: 'city', hex: h, integrity: BASE_INTEGRITY.city })
-    }
+    if (!best) break
+    cityHexes.push(best)
+    used.add(key(best))
+  }
+  return cityHexes
+}
 
-    // Bases on remaining owned tiles (not used by a city), nearest the capital first.
-    // Kazrek is a militia state: no air base, no navy (it gets extra missiles below).
-    const baseTiles = owned.filter((h) => !usedForCity.has(key(h)))
-    let s = 0
-    const place = (type: InstallationType, hex: Hex | undefined) => {
-      if (!hex) return
-      const inst: Installation = { id: `i${iid++}`, owner: f.id, type, hex, integrity: BASE_INTEGRITY[type] }
-      if (type === 'air_base') { inst.charges = 2; inst.maxCharges = 2 }
-      installations.push(inst)
-    }
-    place('army_base', baseTiles[s++])
-    if ((!isNeutral && f.id !== 'kazrek') || f.id === 'ostara') place('air_base', baseTiles[s++])
-    if (isMajor) {
-      const coastal = baseTiles.slice(s).find((h) => seaAdjacentTo(h)) ?? baseTiles[s]
-      place('naval_base', coastal)
-      if (coastal) s = Math.max(s, baseTiles.indexOf(coastal) + 1)
-      place('army_base', baseTiles[s++]) // (was radar)
-    }
+// Cities, bases, and starting forces for one faction.
+function placeFactionAssets(b: Build, f: FactionDef): void {
+  const { tiles } = b
+  const cap = b.factions[f.id].capital
+  // Owned plains tiles, capital first, then nearest-out.
+  const owned = (b.ownedBy[f.id] ?? [])
+    .filter((h) => tiles[key(h)]?.terrain === 'plains')
+    .sort((a, c) => distance(a, cap) - distance(c, cap))
+  const seaForward = [...new Set(
+    owned.flatMap((h) => neighbors(h).filter((n) => tiles[key(n)]?.terrain === 'sea').map(key)),
+  )].map((k) => tiles[k].hex)
 
-    // Forces. Strike platforms (missile/naval) carry 2 charges.
-    const mkForce = (type: Force['type'], hex: Hex | undefined) => {
-      if (!hex) return
-      const strength = type === 'army_group' ? (ARMY_STRENGTH[f.id] ?? FORCE_STRENGTH.army_group) : FORCE_STRENGTH[type]
-      const fc: Force = { id: `f${fid++}`, owner: f.id, type, hex, health: FORCE_HEALTH[type], maxHealth: FORCE_HEALTH[type], strength, acted: false }
-      if (type === 'missile_battery' || type === 'naval_group') { fc.charges = 2; fc.maxCharges = 2 }
-      forces.push(fc)
-    }
-    const isSmallAlly = f.id === 'mirelle' || f.id === 'solvenn'
-    mkForce('army_group', isSmallAlly ? baseTiles[0] : owned[0])
-    if (!isNeutral && !isSmallAlly) mkForce('army_group', owned[1] ?? owned[0])
-    const missileCount = f.id === 'kazrek' ? 2 : f.id === 'mirelle' ? 0 : (isMajor || f.type === 'ally' || f.id === 'khorul') ? 1 : 0
-    for (let m = 0; m < missileCount; m++) mkForce('missile_battery', owned[Math.min(2 + m, owned.length - 1)])
-    if (isMajor) mkForce('naval_group', seaForward[0])
+  const isMajor = isMajorPower(f)
+  const isNeutral = f.type === 'neutral'
+
+  const cityHexes = dispersedCityHexes(owned, isMajor ? 3 : 1)
+  const usedForCity = new Set(cityHexes.map(key))
+  for (const h of cityHexes) b.installations.push(makeInstallation(b, f.id, 'city', h))
+
+  // Bases on remaining owned tiles (not used by a city), nearest the capital first.
+  // Kazrek is a militia state: no air base, no navy (it gets extra missiles below).
+  const baseTiles = owned.filter((h) => !usedForCity.has(key(h)))
+  let s = 0
+  const place = (type: InstallationType, hex: Hex | undefined) => {
+    if (hex) b.installations.push(makeInstallation(b, f.id, type, hex))
+  }
+  place('army_base', baseTiles[s++])
+  if ((!isNeutral && f.id !== 'kazrek') || f.id === 'ostara') place('air_base', baseTiles[s++])
+  if (isMajor) {
+    const coastal = baseTiles.slice(s).find((h) => seaAdjacent(tiles, h)) ?? baseTiles[s]
+    place('naval_base', coastal)
+    if (coastal) s = Math.max(s, baseTiles.indexOf(coastal) + 1)
+    place('army_base', baseTiles[s++]) // (was radar)
   }
 
-  // Forward-base the great powers at the chokepoints: army bases on the land bridge
-  // facing each other, naval bases on the strait shore.
+  const mkForce = (type: ForceType, hex: Hex | undefined) => {
+    if (hex) b.forces.push(makeForce(b, f.id, type, hex))
+  }
+  const isSmallAlly = f.id === 'mirelle' || f.id === 'solvenn'
+  mkForce('army_group', isSmallAlly ? baseTiles[0] : owned[0])
+  if (!isNeutral && !isSmallAlly) mkForce('army_group', owned[1] ?? owned[0])
+  const missileCount = f.id === 'kazrek' ? 2 : f.id === 'mirelle' ? 0 : (isMajor || f.type === 'ally' || f.id === 'khorul') ? 1 : 0
+  for (let m = 0; m < missileCount; m++) mkForce('missile_battery', owned[Math.min(2 + m, owned.length - 1)])
+  if (isMajor) mkForce('naval_group', seaForward[0])
+}
+
+// Forward-base the great powers at the chokepoints: army bases on the land bridge
+// facing each other, naval bases on the strait shore.
+function forwardBaseGreatPowers(b: Build): void {
+  const { tiles, factions, installations } = b
   const relocate = (factionId: FactionId, enemyId: FactionId) => {
     const cityKeys = new Set(installations.filter((i) => i.owner === factionId && i.type === 'city').map((i) => key(i.hex)))
     // Don't stack a base on a city tile.
@@ -383,97 +427,112 @@ export function buildInitialState(): GameState {
     const enemyCap = factions[enemyId].capital
     const shore = ownedPlains
       .filter((h) => neighbors(h).some((n) => tiles[key(n)]?.terrain === 'sea') && (!bridge || key(h) !== key(bridge)))
-      .sort((a, b) => distance(a, enemyCap) - distance(b, enemyCap))[0]
+      .sort((a, c) => distance(a, enemyCap) - distance(c, enemyCap))[0]
     if (shore) { const nb = installations.find((i) => i.owner === factionId && i.type === 'naval_base'); if (nb) nb.hex = shore }
   }
   relocate('aurelia', 'volkaria')
   relocate('volkaria', 'aurelia')
+}
 
-  // Berth each great power's fleet at its own naval base (docked).
-  const dockNavy = (factionId: FactionId) => {
-    const navy = forces.find((f) => f.owner === factionId && f.type === 'naval_group')
-    const base = installations.find((i) => i.owner === factionId && i.type === 'naval_base')
+// Berth each great power's fleet at its own naval base (docked).
+function dockNavies(b: Build): void {
+  const dock = (factionId: FactionId) => {
+    const navy = b.forces.find((f) => f.owner === factionId && f.type === 'naval_group')
+    const base = b.installations.find((i) => i.owner === factionId && i.type === 'naval_base')
     if (navy && base) navy.hex = base.hex
   }
-  dockNavy('aurelia')
-  dockNavy('volkaria')
+  dock('aurelia')
+  dock('volkaria')
+}
 
-  // Amphibious marines: only the two great powers field them. One weaker, sea-mobile
-  // marine group each, berthed at the naval base, ready to storm a coast from the strait.
+// Amphibious marines: only the two great powers field them. One weaker, sea-mobile
+// marine group each, berthed at the naval base, ready to storm a coast from the strait.
+function addMarines(b: Build): void {
   for (const factionId of ['aurelia', 'volkaria'] as FactionId[]) {
-    const base = installations.find((i) => i.owner === factionId && i.type === 'naval_base')
-    if (base) forces.push({
-      id: `f${fid++}`, owner: factionId, type: 'marine', hex: base.hex,
-      health: FORCE_HEALTH.marine, maxHealth: FORCE_HEALTH.marine,
-      strength: FORCE_STRENGTH.marine, acted: false,
-    })
+    const base = b.installations.find((i) => i.owner === factionId && i.type === 'naval_base')
+    if (base) b.forces.push(makeForce(b, factionId, 'marine', base.hex))
   }
+}
 
-  // Extra forces staged at each great power's southern (forward) army base.
+// Extra forces staged at each great power's southern (forward) army base.
+function addStagedForces(b: Build): void {
   const southernBase = (factionId: FactionId) =>
-    installations
+    b.installations
       .filter((i) => i.owner === factionId && i.type === 'army_base')
-      .sort((a, b) => b.hex.r - a.hex.r)[0]
+      .sort((a, c) => c.hex.r - a.hex.r)[0]
 
   const sbAur = southernBase('aurelia')
-  if (sbAur) forces.push({
-    id: `f${fid++}`, owner: 'aurelia', type: 'army_group', hex: sbAur.hex,
-    health: FORCE_HEALTH.army_group, maxHealth: FORCE_HEALTH.army_group,
-    strength: ARMY_STRENGTH.aurelia ?? FORCE_STRENGTH.army_group, acted: false,
-  })
+  if (sbAur) b.forces.push(makeForce(b, 'aurelia', 'army_group', sbAur.hex))
 
   const sbVol = southernBase('volkaria')
-  if (sbVol) forces.push({
-    id: `f${fid++}`, owner: 'volkaria', type: 'missile_battery', hex: sbVol.hex,
-    health: FORCE_HEALTH.missile_battery, maxHealth: FORCE_HEALTH.missile_battery,
-    strength: FORCE_STRENGTH.missile_battery, acted: false, charges: 2, maxCharges: 2,
-  })
+  if (sbVol) b.forces.push(makeForce(b, 'volkaria', 'missile_battery', sbVol.hex))
+}
 
-  // Esquana: disputed territory warrants a naval base, fleet, and missile battery.
+// Esquana: disputed territory warrants a naval base, fleet, and missile battery.
+function addEsquanaAssets(b: Build): void {
+  const { tiles, factions, installations, forces } = b
   const esqUsed = new Set(installations.filter((i) => i.owner === 'esquana').map((i) => key(i.hex)))
   const esqCoastal = Object.values(tiles)
     .filter((t) => t.owner === 'esquana' && t.terrain === 'plains' && !esqUsed.has(key(t.hex)))
     .filter((t) => neighbors(t.hex).some((n) => tiles[key(n)]?.terrain === 'sea'))
-    .sort((a, b) => distance(a.hex, factions['esquana'].capital) - distance(b.hex, factions['esquana'].capital))[0]
+    .sort((a, c) => distance(a.hex, factions['esquana'].capital) - distance(c.hex, factions['esquana'].capital))[0]
   if (esqCoastal) {
-    installations.push({ id: `i${iid++}`, owner: 'esquana', type: 'naval_base', hex: esqCoastal.hex, integrity: BASE_INTEGRITY.naval_base })
-    forces.push({ id: `f${fid++}`, owner: 'esquana', type: 'naval_group', hex: esqCoastal.hex, health: FORCE_HEALTH.naval_group, maxHealth: FORCE_HEALTH.naval_group, strength: FORCE_STRENGTH.naval_group, acted: false, charges: 2, maxCharges: 2 })
+    installations.push(makeInstallation(b, 'esquana', 'naval_base', esqCoastal.hex))
+    forces.push(makeForce(b, 'esquana', 'naval_group', esqCoastal.hex))
   }
   const esqArmyBase = installations.find((i) => i.owner === 'esquana' && i.type === 'army_base')
-  if (esqArmyBase) {
-    forces.push({ id: `f${fid++}`, owner: 'esquana', type: 'missile_battery', hex: esqArmyBase.hex, health: FORCE_HEALTH.missile_battery, maxHealth: FORCE_HEALTH.missile_battery, strength: FORCE_STRENGTH.missile_battery, acted: false, charges: 2, maxCharges: 2 })
+  if (esqArmyBase) forces.push(makeForce(b, 'esquana', 'missile_battery', esqArmyBase.hex))
+}
+
+// Stage the flashpoint: poise a Kazrek army group on the tile it owns next to the
+// DMZ, ready to march in and claim the holy ground.
+function stageKazrekFlashpoint(b: Build): void {
+  const { tiles, forces } = b
+  const dmzHex = Object.values(tiles).find((t) => t.dmz)?.hex
+  if (!dmzHex) return
+  const staging = neighbors(dmzHex).find((h) => tiles[key(h)]?.owner === 'kazrek' && tiles[key(h)]?.terrain === 'plains')
+  if (!staging) return
+  const kazArmy = forces.find((f) => f.owner === 'kazrek' && f.type === 'army_group')
+  if (kazArmy) kazArmy.hex = staging
+  else forces.push(makeForce(b, 'kazrek', 'army_group', staging))
+}
+
+export function buildInitialState(): GameState {
+  const tiles = buildTiles()
+  const ownedBy = ownershipByFaction(tiles)
+  const factions = buildFactions(ownedBy)
+
+  const b: Build = {
+    tiles, factions, ownedBy,
+    installations: [],
+    forces: [],
+    nextInstId: makeIdGen('i'),
+    nextForceId: makeIdGen('f'),
   }
 
-  // Stage the flashpoint: poise a Kazrek army group on the tile it owns next to the
-  // DMZ, ready to march in and claim the holy ground.
-  const dmzHex = Object.values(tiles).find((t) => t.dmz)?.hex
-  if (dmzHex) {
-    const staging = neighbors(dmzHex).find((h) => tiles[key(h)]?.owner === 'kazrek' && tiles[key(h)]?.terrain === 'plains')
-    if (staging) {
-      const kazArmy = forces.find((f) => f.owner === 'kazrek' && f.type === 'army_group')
-      if (kazArmy) kazArmy.hex = staging
-      else forces.push({
-        id: `f${fid++}`, owner: 'kazrek', type: 'army_group', hex: staging,
-        health: FORCE_HEALTH.army_group, maxHealth: FORCE_HEALTH.army_group,
-        strength: ARMY_STRENGTH.kazrek ?? FORCE_STRENGTH.army_group,
-        acted: false,
-      })
-    }
-  }
+  // Order matters: it determines installation/force ids and which tiles are still free.
+  for (const f of FACTIONS) placeFactionAssets(b, f)
+  forwardBaseGreatPowers(b)
+  dockNavies(b)
+  addMarines(b)
+  addStagedForces(b)
+  addEsquanaAssets(b)
+  stageKazrekFlashpoint(b)
 
   return {
     turn: 1,
     order: FACTIONS.map((f) => f.id),
     turnIndex: 0,
-    factions,
-    tiles,
-    installations,
-    forces,
+    factions: b.factions,
+    tiles: b.tiles,
+    installations: b.installations,
+    forces: b.forces,
     deathToll: 0,
     factionDeaths: Object.fromEntries(FACTIONS.map((f) => [f.id, 0])),
     embargoes: [],
     embargoedBy: {},
     ceasefires: [],
+    hostilePairs: [],
     ceasefireRequests: [],
     diplomaticMessages: [],
     log: [

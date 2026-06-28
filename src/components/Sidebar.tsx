@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
-import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, pairKey, procurementRate, projectCost, returnableLand } from '../game/engine'
+import { LABEL, PROJECT_LABEL, airPower, canClaim, canStrike, hasHostileExchange, pairKey, procurementRate, projectCost, restorableContested, returnableLand } from '../game/engine'
 import { key } from '../game/hexUtils'
 import type { CeasefireRequest, GameState, Hex, ProcurementBurden, ProcurementPolicy, ProcurementProjectType } from '../game/types'
 
@@ -44,7 +44,9 @@ function requestTitle(game: GameState, request: CeasefireRequest): string {
 
 function termText(game: GameState, request: CeasefireRequest): string[] {
   return (request.terms ?? []).map((term) =>
-    `Return (${term.hex.q},${term.hex.r}) from ${game.factions[term.from]?.name ?? term.from} to ${game.factions[term.to]?.name ?? term.to}`,
+    term.type === 'return_land'
+      ? `Return (${term.hex.q},${term.hex.r}) from ${game.factions[term.from]?.name ?? term.from} to ${game.factions[term.to]?.name ?? term.to}`
+      : `${game.factions[term.from]?.name ?? term.from} pulls back from (${term.hex.q},${term.hex.r}) — restored to contested`,
   )
 }
 
@@ -66,10 +68,12 @@ export function Sidebar() {
   const [diploTarget, setDiploTarget] = useState('')
   const [diploMessage, setDiploMessage] = useState('')
   const [peaceReturnKeys, setPeaceReturnKeys] = useState<string[]>([])
+  const [peaceRestoreKeys, setPeaceRestoreKeys] = useState<string[]>([])
   const [mediateSideA, setMediateSideA] = useState('')
   const [mediateSideB, setMediateSideB] = useState('')
   const [mediateMessage, setMediateMessage] = useState('')
   const [mediationReturnKeys, setMediationReturnKeys] = useState<string[]>([])
+  const [mediationRestoreKeys, setMediationRestoreKeys] = useState<string[]>([])
   const [ceasefireReply, setCeasefireReply] = useState('')
   const game = useGameStore((s) => s.game)
   const selectedForceId = useGameStore((s) => s.selectedForceId)
@@ -136,17 +140,21 @@ export function Sidebar() {
     : ''
   const canSendDiplomacy = !!selectedDiploTarget && diploMessage.trim().length > 0 && !turnLocked
   const selectedPair = [currentId, selectedDiploTarget].sort().join('|')
+  const selectedPairHasFire = hasHostileExchange(game, currentId, selectedDiploTarget)
   const ceasefireUnavailable =
+    !selectedPairHasFire ||
     (game.ceasefires ?? []).includes(selectedPair) ||
     peacePairAttemptedThisTurn(game, currentId, selectedDiploTarget) ||
     (game.ceasefireRequests ?? []).some((request) =>
       pairKey(request.to, request.counterpartId ?? request.from) === selectedPair,
     )
   const mediationPair = [selectedMediateA, selectedMediateB].sort().join('|')
+  const mediationPairHasFire = hasHostileExchange(game, selectedMediateA, selectedMediateB)
   const mediationUnavailable =
     !selectedMediateA ||
     !selectedMediateB ||
     selectedMediateA === selectedMediateB ||
+    !mediationPairHasFire ||
     (game.ceasefires ?? []).includes(mediationPair) ||
     peacePairAttemptedThisTurn(game, selectedMediateA, selectedMediateB) ||
     (game.ceasefireRequests ?? []).some((request) =>
@@ -161,11 +169,22 @@ export function Sidebar() {
   const selectedPeaceReturnHexes = peaceReturnOptions
     .filter((land) => peaceReturnKeys.includes(hexChoiceKey(land.hex)))
     .map((land) => land.hex)
+  // Seized flashpoints the acting nation could hand back to contested status as a term.
+  const peaceRestoreOptions = restorableContested(game, currentId)
+  const selectedPeaceRestoreHexes = peaceRestoreOptions
+    .filter((land) => peaceRestoreKeys.includes(hexChoiceKey(land.hex)))
+    .map((land) => land.hex)
   const mediationReturnOptions = selectedMediateA && selectedMediateB
     ? returnableLand(game, selectedMediateB).filter((land) => land.to === selectedMediateA)
     : []
   const selectedMediationReturnHexes = mediationReturnOptions
     .filter((land) => mediationReturnKeys.includes(hexChoiceKey(land.hex)))
+    .map((land) => land.hex)
+  const mediationRestoreOptions = selectedMediateA && selectedMediateB
+    ? restorableContested(game, selectedMediateB)
+    : []
+  const selectedMediationRestoreHexes = mediationRestoreOptions
+    .filter((land) => mediationRestoreKeys.includes(hexChoiceKey(land.hex)))
     .map((land) => land.hex)
   const [expandedDiplomacy, setExpandedDiplomacy] = useState(false)
   const handleAutoTakeTurns = (enabled: boolean) => {
@@ -200,6 +219,31 @@ export function Sidebar() {
     </div>
   )
 
+  const renderRestoreChoices = (
+    options: Array<{ hex: Hex }>,
+    selectedKeys: string[],
+    onToggle: (hex: Hex) => void,
+    label: string,
+  ) => options.length > 0 && (
+    <div className="return-terms">
+      <div className="terms-title">{label}</div>
+      {options.map((land) => {
+        const k = hexChoiceKey(land.hex)
+        return (
+          <label key={k} className="return-row">
+            <input
+              type="checkbox"
+              checked={selectedKeys.includes(k)}
+              onChange={() => onToggle(land.hex)}
+              disabled={turnLocked}
+            />
+            <span>({land.hex.q},{land.hex.r}) → contested</span>
+          </label>
+        )
+      })}
+    </div>
+  )
+
   const renderDiplomacyControls = () => (
     <>
       <select value={selectedDiploTarget} onChange={(event) => setDiploTarget(event.target.value)} disabled={turnLocked}>
@@ -219,6 +263,12 @@ export function Sidebar() {
         (hex) => setPeaceReturnKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
         'Offer returned land',
       )}
+      {renderRestoreChoices(
+        peaceRestoreOptions,
+        peaceRestoreKeys,
+        (hex) => setPeaceRestoreKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
+        'Restore contested territory',
+      )}
       <div className="action-row">
         <button
           disabled={!canSendDiplomacy}
@@ -226,14 +276,22 @@ export function Sidebar() {
         >Send</button>
         <button
           disabled={!canSendDiplomacy || ceasefireUnavailable}
-          onClick={() => { void requestCeasefire(selectedDiploTarget, diploMessage); setDiploMessage('') }}
+          title={selectedPairHasFire ? undefined : 'Ceasefire requires prior exchange of fire between these countries.'}
+          onClick={() => {
+            void requestCeasefire(selectedDiploTarget, diploMessage, selectedPeaceReturnHexes, selectedPeaceRestoreHexes)
+            setDiploMessage('')
+            setPeaceReturnKeys([])
+            setPeaceRestoreKeys([])
+          }}
         >Ask Ceasefire</button>
         <button
           disabled={!canSendDiplomacy || ceasefireUnavailable}
+          title={selectedPairHasFire ? undefined : 'Peace offer requires prior exchange of fire between these countries.'}
           onClick={() => {
-            void requestPeace(selectedDiploTarget, diploMessage, selectedPeaceReturnHexes)
+            void requestPeace(selectedDiploTarget, diploMessage, selectedPeaceReturnHexes, selectedPeaceRestoreHexes)
             setDiploMessage('')
             setPeaceReturnKeys([])
+            setPeaceRestoreKeys([])
           }}
         >Offer Peace</button>
       </div>
@@ -260,13 +318,21 @@ export function Sidebar() {
           (hex) => setMediationReturnKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
           `${game.factions[selectedMediateB]?.name ?? selectedMediateB} returns land`,
         )}
+        {renderRestoreChoices(
+          mediationRestoreOptions,
+          mediationRestoreKeys,
+          (hex) => setMediationRestoreKeys((selectedKeys) => toggleHexChoice(selectedKeys, hex)),
+          `${game.factions[selectedMediateB]?.name ?? selectedMediateB} restores contested territory`,
+        )}
         <button
           className="ghost full"
           disabled={!canMediate}
+          title={mediationPairHasFire ? undefined : 'Mediation requires prior exchange of fire between the two parties.'}
           onClick={() => {
-            void mediatePeace(selectedMediateA, selectedMediateB, mediationText, selectedMediationReturnHexes)
+            void mediatePeace(selectedMediateA, selectedMediateB, mediationText, selectedMediationReturnHexes, selectedMediationRestoreHexes)
             setMediateMessage('')
             setMediationReturnKeys([])
+            setMediationRestoreKeys([])
             if (!mediateMessage.trim()) setDiploMessage('')
           }}
         >Mediate Peace</button>

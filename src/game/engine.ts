@@ -242,6 +242,13 @@ function tileDefenders(s: GameState, to: Hex, attackerAlign: Alignment, attacker
   return out
 }
 
+/** Before a disputed/DMZ flashpoint is seized, record its contested origin so a later
+ *  peace deal can hand it back to contested status instead of to a single owner. */
+function rememberFlashpoint(t: GameState['tiles'][string]) {
+  if (t.disputedBy?.length) t.priorDisputedBy = [...t.disputedBy]
+  if (t.dmz) t.priorDmz = true
+}
+
 function claimOccupiedHex(s: GameState, force: Force): boolean {
   const t = s.tiles[key(force.hex)]
   if (!t || t.owner === force.owner) return false
@@ -253,6 +260,7 @@ function claimOccupiedHex(s: GameState, force: Force): boolean {
   const wasDmz = t.dmz
   const wasDisputed = !!t.disputedBy?.length || t.contested
   const disputedNames = t.disputedBy?.map((id) => s.factions[id]?.name ?? id).join(' and ')
+  rememberFlashpoint(t)
   t.lastOwner = prevOwner
   t.owner = force.owner
   t.dmz = false
@@ -339,6 +347,7 @@ export function resolveAssault(state: GameState, attackerId: string, to: Hex): G
   else outcome = 'but the position holds'
 
   s.factions[ownerId].disposition = clamp(s.factions[ownerId].disposition - 6, -100, 100)
+  markHostileExchange(s, atk.owner, ownerId)
   log(s, { kind: 'system', faction: atk.owner, text: `${s.factions[atk.owner].name}'s army assaults ${s.factions[ownerId].name}'s ${defName} (−${dmgToDef}${unit}), taking −${dmgToAtk} HP ${outcome}.${deathNote(attackerDeaths + defenderDeaths)}` })
   checkRegime(s)
   return s
@@ -403,6 +412,7 @@ export function resolveNavalAssault(state: GameState, attackerId: string, to: He
   }
 
   s.factions[ownerId].disposition = clamp(s.factions[ownerId].disposition - 6, -100, 100)
+  markHostileExchange(s, atk.owner, ownerId)
   log(s, { kind: 'system', faction: atk.owner, text: `${s.factions[atk.owner].name}'s fleet engages ${s.factions[ownerId].name}'s ${defName} (−${dmgToDef}${unit}), taking −${dmgToAtk} HP ${outcome}.${deathNote(attackerDeaths + defenderDeaths)}` })
   checkRegime(s)
   return s
@@ -438,6 +448,7 @@ export function moveForce(state: GameState, forceId: string, to: Hex): GameState
       const attackerDeaths = addDeaths(s, force.owner, forceDeaths(force.type, actualForceDamage, force.health <= 0))
       const localDeaths = addDeaths(s, t.owner, randInt(5, 35))
       s.factions[t.owner].disposition = clamp(s.factions[t.owner].disposition - 4, -100, 100)
+      markHostileExchange(s, force.owner, t.owner)
       if (force.health <= 0) {
         s.forces = s.forces.filter((f) => f.id !== force.id)
         log(s, { kind: 'system', faction: force.owner, text: `${s.factions[force.owner].name}'s army is destroyed assaulting ${land} territory.${deathNote(attackerDeaths + localDeaths)}` })
@@ -501,6 +512,7 @@ export function claimHex(state: GameState, forceId: string): GameState {
   const wasDmz = t.dmz
   const wasDisputed = !!t.disputedBy?.length || t.contested
   const disputedNames = t.disputedBy?.map((id) => s.factions[id]?.name ?? id).join(' and ')
+  rememberFlashpoint(t)
   t.lastOwner = prevOwner
   t.owner = force.owner
   t.dmz = false
@@ -859,6 +871,18 @@ export function pairKey(a: string, b: string): string {
   return [a, b].sort().join('|')
 }
 
+export function hasHostileExchange(s: GameState, a: string, b: string): boolean {
+  if (a === b) return false
+  return (s.hostilePairs ?? []).includes(pairKey(a, b))
+}
+
+function markHostileExchange(s: GameState, a: string, b: string) {
+  if (a === b) return
+  const k = pairKey(a, b)
+  const pairs = s.hostilePairs ??= []
+  if (!pairs.includes(k)) pairs.push(k)
+}
+
 function requestSubjectPairKey(request: CeasefireRequest): string {
   return pairKey(request.to, request.counterpartId ?? request.from)
 }
@@ -1024,20 +1048,68 @@ function peaceTermsForHexes(s: GameState, fromId: string, returnHexes: Hex[] = [
   return terms
 }
 
+/** Seized flashpoints the faction holds that could be relinquished back to contested
+ *  status (they carry a recorded contested origin and no city sits on them). */
+export function restorableContested(state: GameState, factionId: string): Array<{ hex: Hex; disputedBy?: string[]; dmz?: boolean }> {
+  return Object.values(state.tiles)
+    .filter((tile) => tile.owner === factionId && ((tile.priorDisputedBy?.length ?? 0) > 0 || !!tile.priorDmz))
+    .filter((tile) => !state.installations.some((i) => i.type === 'city' && hexEquals(i.hex, tile.hex)))
+    .map((tile) => ({ hex: tile.hex, disputedBy: tile.priorDisputedBy, dmz: tile.priorDmz }))
+}
+
+function contestedTermsForHexes(s: GameState, fromId: string, restoreHexes: Hex[] = []): PeaceTerm[] {
+  const terms: PeaceTerm[] = []
+  const seen = new Set<string>()
+  for (const hex of restoreHexes) {
+    const tile = s.tiles[key(hex)]
+    if (!tile || tile.owner !== fromId) continue
+    if (!(tile.priorDisputedBy?.length || tile.priorDmz)) continue
+    if (s.installations.some((i) => i.type === 'city' && hexEquals(i.hex, hex))) continue
+    const termKey = key(hex)
+    if (seen.has(termKey)) continue
+    seen.add(termKey)
+    terms.push({ type: 'restore_contested', hex: tile.hex, from: fromId, disputedBy: tile.priorDisputedBy, dmz: tile.priorDmz })
+  }
+  return terms
+}
+
+/** Human-readable fragment for a single peace term (used in dispatch logs). */
+function describeTerm(s: GameState, term: PeaceTerm): string {
+  if (term.type === 'return_land') return `returns (${term.hex.q},${term.hex.r}) to ${s.factions[term.to]?.name ?? term.to}`
+  return `restores (${term.hex.q},${term.hex.r}) to contested status`
+}
+
 function applyPeaceTerms(s: GameState, terms: PeaceTerm[] = []) {
   for (const term of terms) {
-    if (term.type !== 'return_land') continue
     const tile = s.tiles[key(term.hex)]
-    if (!tile || tile.owner !== term.from || !s.factions[term.to]) continue
-    tile.owner = term.to
-    tile.lastOwner = term.from
-    tile.contested = true
-    transferCitiesOnHex(s, term.hex, term.to, term.from)
-    log(s, {
-      kind: 'dispatch',
-      faction: term.from,
-      text: `${s.factions[term.from]?.name ?? term.from} returns (${term.hex.q},${term.hex.r}) to ${s.factions[term.to]?.name ?? term.to} as part of a peace settlement.`,
-    })
+    if (!tile || tile.owner !== term.from) continue
+    if (term.type === 'return_land') {
+      if (!s.factions[term.to]) continue
+      tile.owner = term.to
+      tile.lastOwner = term.from
+      tile.contested = true
+      tile.priorDisputedBy = undefined
+      tile.priorDmz = undefined
+      transferCitiesOnHex(s, term.hex, term.to, term.from)
+      log(s, {
+        kind: 'dispatch',
+        faction: term.from,
+        text: `${s.factions[term.from]?.name ?? term.from} returns (${term.hex.q},${term.hex.r}) to ${s.factions[term.to]?.name ?? term.to} as part of a peace settlement.`,
+      })
+    } else {
+      tile.lastOwner = term.from
+      tile.owner = null
+      tile.disputedBy = term.disputedBy?.length ? [...term.disputedBy] : undefined
+      tile.dmz = !!term.dmz
+      tile.contested = true
+      tile.priorDisputedBy = undefined
+      tile.priorDmz = undefined
+      log(s, {
+        kind: 'dispatch',
+        faction: term.from,
+        text: `${s.factions[term.from]?.name ?? term.from} pulls back from (${term.hex.q},${term.hex.r}), restoring it to contested status as part of a peace settlement.`,
+      })
+    }
   }
 }
 
@@ -1047,34 +1119,16 @@ function hasOpenPeaceRequestForPair(s: GameState, a: string, b: string): boolean
 }
 
 function canAttemptPeaceForPair(s: GameState, a: string, b: string): boolean {
-  return a !== b && !hasCeasefire(s, a, b) && !hasOpenPeaceRequestForPair(s, a, b) && !peacePairAttemptedThisTurn(s, a, b)
+  return a !== b && hasHostileExchange(s, a, b) && !hasCeasefire(s, a, b) && !hasOpenPeaceRequestForPair(s, a, b) && !peacePairAttemptedThisTurn(s, a, b)
 }
 
-export function proposeCeasefire(state: GameState, fromId: string, toId: string, message: string): GameState {
-  if (!canAttemptPeaceForPair(state, fromId, toId)) return state
-  const text = cleanDiplomaticMessage(message)
-  if (!text) return state
-  const s = clone(state)
-  ensureDiplomacy(s)
-  const from = s.factions[fromId]
-  const to = s.factions[toId]
-  if (!from || !to) return state
-  if (!canAttemptPeaceForPair(s, fromId, toId)) return state
-  markPeacePairAttempt(s, fromId, toId)
-  const request: CeasefireRequest = { id: nextDiplomacyId(s, 'cf'), from: fromId, to: toId, message: text, turn: s.turn, kind: 'ceasefire' }
-  s.ceasefireRequests.unshift(request)
-  s.diplomaticMessages.unshift({ ...request, kind: 'ceasefire_request' })
-  s.diplomaticMessages = s.diplomaticMessages.slice(0, 80)
-  log(s, { kind: 'dispatch', faction: fromId, text: `${from.name} asks ${to.name} for a ceasefire: "${text}"` })
-  return s
-}
-
-export function proposePeace(
+export function proposeCeasefire(
   state: GameState,
   fromId: string,
   toId: string,
   message: string,
   returnHexes: Hex[] = [],
+  restoreHexes: Hex[] = [],
 ): GameState {
   if (!canAttemptPeaceForPair(state, fromId, toId)) return state
   const text = cleanDiplomaticMessage(message)
@@ -1086,12 +1140,40 @@ export function proposePeace(
   if (!from || !to) return state
   if (!canAttemptPeaceForPair(s, fromId, toId)) return state
   markPeacePairAttempt(s, fromId, toId)
-  const terms = peaceTermsForHexes(s, fromId, returnHexes, toId)
+  const terms = [...peaceTermsForHexes(s, fromId, returnHexes, toId), ...contestedTermsForHexes(s, fromId, restoreHexes)]
+  const request: CeasefireRequest = { id: nextDiplomacyId(s, 'cf'), from: fromId, to: toId, message: text, turn: s.turn, kind: 'ceasefire', terms }
+  s.ceasefireRequests.unshift(request)
+  s.diplomaticMessages.unshift({ ...request, kind: 'ceasefire_request' })
+  s.diplomaticMessages = s.diplomaticMessages.slice(0, 80)
+  const termText = terms.length ? ` Terms: ${terms.map((term) => describeTerm(s, term)).join(', ')}.` : ''
+  log(s, { kind: 'dispatch', faction: fromId, text: `${from.name} asks ${to.name} for a ceasefire: "${text}"${termText}` })
+  return s
+}
+
+export function proposePeace(
+  state: GameState,
+  fromId: string,
+  toId: string,
+  message: string,
+  returnHexes: Hex[] = [],
+  restoreHexes: Hex[] = [],
+): GameState {
+  if (!canAttemptPeaceForPair(state, fromId, toId)) return state
+  const text = cleanDiplomaticMessage(message)
+  if (!text) return state
+  const s = clone(state)
+  ensureDiplomacy(s)
+  const from = s.factions[fromId]
+  const to = s.factions[toId]
+  if (!from || !to) return state
+  if (!canAttemptPeaceForPair(s, fromId, toId)) return state
+  markPeacePairAttempt(s, fromId, toId)
+  const terms = [...peaceTermsForHexes(s, fromId, returnHexes, toId), ...contestedTermsForHexes(s, fromId, restoreHexes)]
   const request: CeasefireRequest = { id: nextDiplomacyId(s, 'cf'), from: fromId, to: toId, message: text, turn: s.turn, kind: 'peace_offer', terms }
   s.ceasefireRequests.unshift(request)
   s.diplomaticMessages.unshift({ ...request, kind: 'peace_offer' })
   s.diplomaticMessages = s.diplomaticMessages.slice(0, 80)
-  const termText = terms.length ? ` Terms: ${terms.map((term) => `return (${term.hex.q},${term.hex.r})`).join(', ')}.` : ''
+  const termText = terms.length ? ` Terms: ${terms.map((term) => describeTerm(s, term)).join(', ')}.` : ''
   log(s, { kind: 'dispatch', faction: fromId, text: `${from.name} offers ${to.name} a peace settlement: "${text}"${termText}` })
   return s
 }
@@ -1103,6 +1185,7 @@ export function mediatePeace(
   sideBId: string,
   message: string,
   returnHexes: Hex[] = [],
+  restoreHexes: Hex[] = [],
 ): GameState {
   if (!canAttemptPeaceForPair(state, sideAId, sideBId)) return state
   const text = cleanDiplomaticMessage(message)
@@ -1115,7 +1198,7 @@ export function mediatePeace(
   if (!mediator || !sideA || !sideB) return state
   if (!canAttemptPeaceForPair(s, sideAId, sideBId)) return state
   markPeacePairAttempt(s, sideAId, sideBId)
-  const terms = peaceTermsForHexes(s, sideBId, returnHexes, sideAId)
+  const terms = [...peaceTermsForHexes(s, sideBId, returnHexes, sideAId), ...contestedTermsForHexes(s, sideBId, restoreHexes)]
   const request: CeasefireRequest = {
     id: nextDiplomacyId(s, 'cf'),
     from: mediatorId,
@@ -1129,7 +1212,7 @@ export function mediatePeace(
   s.ceasefireRequests.unshift(request)
   s.diplomaticMessages.unshift({ ...request, kind: 'mediation_offer' })
   s.diplomaticMessages = s.diplomaticMessages.slice(0, 80)
-  const termText = terms.length ? ` Terms: ${terms.map((term) => `${s.factions[term.from]?.name ?? term.from} returns (${term.hex.q},${term.hex.r})`).join(', ')}.` : ''
+  const termText = terms.length ? ` Terms: ${terms.map((term) => `${s.factions[term.from]?.name ?? term.from} ${describeTerm(s, term)}`).join(', ')}.` : ''
   log(s, { kind: 'dispatch', faction: mediatorId, text: `${mediator.name} asks ${sideA.name} to accept mediated peace with ${sideB.name}: "${text}"${termText}` })
   return s
 }
@@ -1307,9 +1390,11 @@ function applyStrike(s: GameState, atkId: string, target: Hex, kind: StrikeKind,
       recomputeMarket(s, inst.owner)
       owner.support = clamp(owner.support + (intensity === 'full' ? 12 : 8)) // rally-round-the-flag
       owner.disposition = clamp(owner.disposition - 12, -100, 100)
+      markHostileExchange(s, atkId, inst.owner)
       log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on a ${owner.name} city (integrity ${inst.integrity}%). Outrage rallies its people behind their government; the economy reels.${deathNote(deaths)}` })
     } else {
       owner.disposition = clamp(owner.disposition - 8, -100, 100)
+      markHostileExchange(s, atkId, inst.owner)
       const garrisoned = shield === inst && !!enemyForce
       if (inst.integrity <= 0) {
         s.installations = s.installations.filter((i) => i.id !== inst.id)
@@ -1337,6 +1422,7 @@ function applyStrike(s: GameState, atkId: string, target: Hex, kind: StrikeKind,
       log(s, { kind: 'dispatch', faction: atkId, text: `${verb} on ${on}'s ${forceNoun(enemyForce.type)} (now ${enemyForce.health} HP).${deathNote(deaths)}` })
     }
     s.factions[enemyForce.owner].disposition = clamp(s.factions[enemyForce.owner].disposition - 6, -100, 100)
+    markHostileExchange(s, atkId, enemyForce.owner)
   }
 }
 

@@ -23,6 +23,17 @@ function isPressStatement(event: GameEvent): boolean {
   return event.kind === 'dispatch' && / press statement: /i.test(event.text)
 }
 
+function isOperationalEvent(event: GameEvent): boolean {
+  if (isPressStatement(event)) return false
+  return [
+    /\blands a (limited|full) (air|naval|missile) strike\b/i,
+    /\b(?:army|fleet) (?:assaults|engages|pushes into|is destroyed assaulting)\b/i,
+    /\bforward-deploys\b/i,
+    /\b(?:seizes|claims|marches into|occupies)\b/i,
+    /\b(?:embargoes|restores trade with)\b/i,
+  ].some((pattern) => pattern.test(event.text))
+}
+
 function pressStatementLabel(game: GameState, event: GameEvent): string {
   return event.faction ? game.factions[event.faction]?.name ?? event.faction : 'Press statement'
 }
@@ -46,7 +57,7 @@ export function InfoPanel() {
   const diplomaticMessages = game.diplomaticMessages ?? []
   const ceasefires = game.ceasefires ?? []
   const pressStatements = game.log.filter(isPressStatement)
-  const dispatchEvents = game.log.filter((event) => !isPressStatement(event))
+  const dispatchEvents = game.log.filter(isOperationalEvent)
 
   const tile = inspectHex ? game.tiles[key(inspectHex)] : undefined
   const tileInstalls = inspectHex ? game.installations.filter((i) => key(i.hex) === key(inspectHex)) : []
@@ -83,12 +94,19 @@ export function InfoPanel() {
 
   const renderDispatchLog = () => (
     <ul className="log">
-      {dispatchEvents.map((e, i) => (
-        <li key={i} className={`log-${e.kind}`}>
-          <span className="log-turn">T{e.turn}</span>
-          <span>{e.text}</span>
+      {dispatchEvents.length > 0 ? (
+        dispatchEvents.map((e, i) => (
+          <li key={i} className={`log-${e.kind}`}>
+            <span className="log-turn">T{e.turn}</span>
+            <span>{e.text}</span>
+          </li>
+        ))
+      ) : (
+        <li className="log-system">
+          <span className="log-turn">--</span>
+          <span>No moves or attacks yet.</span>
         </li>
-      ))}
+      )}
     </ul>
   )
 

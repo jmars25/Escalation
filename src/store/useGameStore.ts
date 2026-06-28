@@ -51,9 +51,9 @@ interface GameStore {
   startProcurement: (type: ProcurementProjectType) => void
   sendAidPackage: (targetId: string, type: AidPackageType) => void
   sendDiplomaticMessage: (targetId: string, message: string) => void
-  mediatePeace: (sideAId: string, sideBId: string, message: string, returnHexes?: Hex[]) => Promise<void>
-  requestPeace: (targetId: string, message: string, returnHexes?: Hex[]) => Promise<void>
-  requestCeasefire: (targetId: string, message: string) => Promise<void>
+  mediatePeace: (sideAId: string, sideBId: string, message: string, returnHexes?: Hex[], restoreHexes?: Hex[]) => Promise<void>
+  requestPeace: (targetId: string, message: string, returnHexes?: Hex[], restoreHexes?: Hex[]) => Promise<void>
+  requestCeasefire: (targetId: string, message: string, returnHexes?: Hex[], restoreHexes?: Hex[]) => Promise<void>
   respondCeasefire: (requestId: string, accepted: boolean, message: string) => Promise<void>
   enterStrike: (intensity: StrikeIntensity) => void
   enterAirStrike: (intensity: StrikeIntensity) => void
@@ -307,7 +307,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     set({ game: result })
   },
 
-  mediatePeace: async (sideAId, sideBId, message, returnHexes = []) => {
+  mediatePeace: async (sideAId, sideBId, message, returnHexes = [], restoreHexes = []) => {
     const { game } = get()
     if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
@@ -315,7 +315,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       const res = await fetch('http://localhost:3001/api/mediation-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: game, mediatorId: currentFactionId(game), sideAId, sideBId, message, returnHexes }),
+        body: JSON.stringify({ state: game, mediatorId: currentFactionId(game), sideAId, sideBId, message, returnHexes, restoreHexes }),
       })
       if (!res.ok) throw new Error(await res.text())
       const { finalState } = await res.json() as { finalState: typeof game }
@@ -328,7 +328,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     }
   },
 
-  requestPeace: async (targetId, message, returnHexes = []) => {
+  requestPeace: async (targetId, message, returnHexes = [], restoreHexes = []) => {
     const { game } = get()
     if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
@@ -336,7 +336,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       const res = await fetch('http://localhost:3001/api/peace-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message, returnHexes }),
+        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message, returnHexes, restoreHexes }),
       })
       if (!res.ok) throw new Error(await res.text())
       const { finalState } = await res.json() as { finalState: typeof game; response: 'accepted' | 'rejected'; message: string }
@@ -349,7 +349,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     }
   },
 
-  requestCeasefire: async (targetId, message) => {
+  requestCeasefire: async (targetId, message, returnHexes = [], restoreHexes = []) => {
     const { game } = get()
     if (game.regimeFallen || get().aiPending || hasPendingPlayerDiplomacy(game)) return
     set({ aiPending: true, selectedForceId: null, selectedInstallId: null, mode: 'move', moveTargets: [], strikeTargets: [] })
@@ -357,7 +357,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       const res = await fetch('http://localhost:3001/api/ceasefire-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message }),
+        body: JSON.stringify({ state: game, fromId: currentFactionId(game), toId: targetId, message, returnHexes, restoreHexes }),
       })
       if (!res.ok) throw new Error(await res.text())
       const { finalState } = await res.json() as { finalState: typeof game; response: 'accepted' | 'rejected'; message: string }

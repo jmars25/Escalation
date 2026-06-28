@@ -25,6 +25,11 @@ export interface Tile {
   disputedBy?: FactionId[]
   /** A demilitarized zone — claiming it (moving troops in) is a major political act. */
   dmz?: boolean
+  /** If this tile was a disputed flashpoint before being seized, the disputants at the
+   *  time — so a peace deal can hand it back to contested status rather than to an owner. */
+  priorDisputedBy?: FactionId[]
+  /** If this tile was a DMZ before being seized — restored alongside priorDisputedBy. */
+  priorDmz?: boolean
   /** Sea or island tile that is part of the strait — the only water naval units may navigate. */
   strait?: boolean
   terrain: Terrain
@@ -155,12 +160,11 @@ export interface CeasefireRequest {
   terms?: PeaceTerm[]
 }
 
-export interface PeaceTerm {
-  type: 'return_land'
-  hex: Hex
-  from: FactionId
-  to: FactionId
-}
+export type PeaceTerm =
+  /** Hand a seized tile back to a specific previous owner. */
+  | { type: 'return_land'; hex: Hex; from: FactionId; to: FactionId }
+  /** Pull back from a seized flashpoint, restoring it to unowned/contested status. */
+  | { type: 'restore_contested'; hex: Hex; from: FactionId; disputedBy?: FactionId[]; dmz?: boolean }
 
 export interface DiplomaticMessage {
   id: string
@@ -208,6 +212,8 @@ export interface GameState {
   embargoedBy: Record<string, FactionId>
   /** Active bilateral ceasefire pairs, each a sorted "a|b" faction-pair key. */
   ceasefires: string[]
+  /** Faction pairs that have exchanged fire through strikes or combat. */
+  hostilePairs?: string[]
   /** Ceasefire proposals waiting for the target faction to answer. */
   ceasefireRequests: CeasefireRequest[]
   /** Last round where a ceasefire, peace offer, or mediation was attempted for each faction pair. */
