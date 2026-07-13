@@ -1,12 +1,12 @@
 :root {
-  --bg: #070b12;
-  --panel: #0e1626;
-  --panel-2: #131f33;
-  --border: #1e293b;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #3b82f6;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  --bg: #008080;
+  --panel: #c0c0c0;
+  --panel-2: #dfdfdf;
+  --border: #808080;
+  --text: #000;
+  --muted: #444;
+  --accent: #000080;
+  font-family: "Pixelated MS Sans Serif", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -511,4 +511,288 @@ button.ghost {
     height: 100%;
     max-height: none;
   }
+}
+
+/* Windows 98 desktop theme ------------------------------------------------ */
+html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: "Pixelated MS Sans Serif", Arial, sans-serif;
+  font-size: 11px;
+}
+
+.layout {
+  grid-template-columns: 280px minmax(320px, 1fr) 320px;
+  gap: 4px;
+  padding: 4px;
+  background: #008080;
+}
+
+.sidebar,
+.infopanel {
+  gap: 8px;
+  padding: 5px;
+  color: #000;
+  background: #c0c0c0;
+  border-top: 2px solid #fff;
+  border-left: 2px solid #fff;
+  border-right: 2px solid #000;
+  border-bottom: 2px solid #000;
+  box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf;
+  scrollbar-color: #c0c0c0 #dfdfdf;
+}
+
+.board {
+  position: relative;
+  background: #000;
+  border-top: 2px solid #000;
+  border-left: 2px solid #000;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #dfdfdf;
+}
+
+.board::before {
+  content: "Strategic Map - Escalation";
+  position: absolute;
+  z-index: 4;
+  top: 3px;
+  left: 3px;
+  right: 3px;
+  height: 18px;
+  padding: 3px 4px 2px;
+  color: #fff;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  font-weight: 700;
+  line-height: 13px;
+  pointer-events: none;
+}
+
+.hexmap { padding-top: 22px; }
+
+.panel {
+  color: #000;
+  background: #c0c0c0;
+  border: 0;
+  border-radius: 0;
+  padding: 8px;
+  box-shadow: inset -1px -1px #000, inset 1px 1px #fff,
+    inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+}
+
+.panel-header,
+.modal-head {
+  min-height: 18px;
+  margin: -5px -5px 7px;
+  padding: 3px 4px 2px;
+  color: #fff;
+  background: linear-gradient(90deg, #000080, #1084d0);
+}
+
+.panel-header h2,
+.modal-head h2,
+.modal-head h3 {
+  color: #fff;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+h1 { color: #000; font-size: 17px; letter-spacing: 1px; text-shadow: 1px 1px #fff; }
+h2 { color: #000080; font-size: 11px; letter-spacing: 0; }
+h3 { color: #000; font-size: 12px; }
+.turn, .hint, .panel-note, .ftype, .stat-row, .inspect-line.muted,
+.diplo-line, .log-system span:last-child, .air-power, .return-row,
+.ceasefire-request p, .opinion-panel p { color: #444; }
+.stat-row strong, .panel-note strong, .air-power strong, .inspect-line,
+.diplo-line strong, .log li { color: #000; }
+
+button,
+.action-row button,
+.strike-btns button,
+.seg-row button,
+.project-grid button,
+.aid-row button,
+.posture-row button,
+.trade-btn,
+button.primary,
+button.ghost,
+.expand-btn {
+  min-height: 23px;
+  padding: 3px 8px;
+  color: #000;
+  background: #c0c0c0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset -1px -1px #000, inset 1px 1px #fff,
+    inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+  font-weight: 400;
+}
+
+button:not(:disabled):active,
+.action-row button:not(:disabled):active,
+.seg-row button:not(:disabled):active,
+.project-grid button:not(:disabled):active,
+.aid-row button:not(:disabled):active,
+.posture-row button:not(:disabled):active,
+.trade-btn:not(:disabled):active {
+  padding: 4px 7px 2px 9px;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #000,
+    inset -2px -2px #dfdfdf, inset 2px 2px #808080;
+}
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+button:disabled { color: #808080; opacity: 1; text-shadow: 1px 1px #fff; }
+button.primary { color: #000; }
+button.primary:hover { background: #c0c0c0; }
+.expand-btn { width: 18px; height: 16px; min-height: 16px; padding: 0; color: #000; }
+.close-btn { color: #000; }
+
+.seg-row button.active,
+.posture-row button.active {
+  color: #fff;
+  background: #000080;
+  box-shadow: inset 1px 1px #000, inset -1px -1px #fff;
+}
+
+.procurement-panel { min-width: 0; }
+.procurement-panel .seg-row,
+.procurement-panel .project-grid,
+.procurement-panel .aid-list { min-width: 0; }
+.procurement-panel .seg-row button,
+.procurement-panel .project-grid button,
+.procurement-panel .aid-row button {
+  min-width: 0;
+  padding-left: 3px;
+  padding-right: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.procurement-panel .seg-row { gap: 3px; }
+.procurement-panel .aid-row { grid-template-columns: minmax(0, 1fr) 72px 42px; gap: 3px; }
+
+.diplomacy-panel select,
+.diplomacy-panel textarea,
+select,
+textarea,
+input[type="text"] {
+  color: #000;
+  background: #fff;
+  border-radius: 0;
+  border: 0;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #000,
+    inset -2px -2px #dfdfdf, inset 2px 2px #808080;
+}
+
+.diplomacy-panel select { min-height: 21px; padding: 3px 5px; }
+.diplomacy-panel textarea { padding: 5px; }
+input[type="checkbox"] { accent-color: #000080; }
+
+.meter {
+  height: 15px;
+  padding: 2px;
+  background: #fff;
+  border-radius: 0;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080,
+    inset -2px -2px #dfdfdf, inset 2px 2px #000;
+}
+.meter.small { height: 12px; }
+.meter-fill { transition: width 0.3s ease, background 0.3s; }
+
+.death-toll,
+.aid-list,
+.mediation-box,
+.opinion-preferred,
+.ceasefire-inbox { border-color: #808080; }
+
+.return-terms,
+.ceasefire-request,
+.ceasefire-request.prominent,
+.opinion-panel,
+.acting,
+.exile-banner {
+  color: #000;
+  background: #dfdfdf;
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080,
+    inset -2px -2px #dfdfdf, inset 2px 2px #000;
+}
+
+.ceasefire-request strong,
+.ceasefire-request.prominent strong,
+.opinion-preferred strong { color: #000; }
+.opinion-kicker { color: #000080; }
+.opinion-score.positive { color: #008000; }
+.opinion-score.negative, .gameover h2 { color: #800000; }
+.gameover { border: 2px solid #800000; }
+.exile-banner { color: #800000; }
+
+.factions li,
+.diplo-line,
+.log li { padding: 2px 3px; }
+.factions li:nth-child(even),
+.log li:nth-child(even) { background: #dfdfdf; }
+.diplo-line { border-left-color: #808080; }
+.diplo-line.active, .diplo-line.accepted { border-left-color: #008000; }
+.diplo-line.rejected { border-left-color: #800000; }
+.diplo-line.press-statement { border-left-color: #000080; }
+.diplo-line.press-statement strong { color: #000080; }
+.log-escalation span:last-child { color: #800000; }
+.log-ai span:last-child { color: #000080; }
+
+.trade-btn.open { color: #008000; }
+.trade-btn.cut { color: #800000; }
+.trade-btn.pending { color: #808000; }
+.trade-btn.locked { color: #808080; background: #c0c0c0; }
+
+.modal-backdrop,
+.intro-overlay { background: rgba(0, 0, 0, 0.45); }
+
+.expanded-window,
+.intro-modal {
+  color: #000;
+  background: #c0c0c0;
+  border: 0;
+  border-radius: 0;
+  padding: 3px;
+  box-shadow: inset -1px -1px #000, inset 1px 1px #dfdfdf,
+    inset -2px -2px #808080, inset 2px 2px #fff, 5px 5px 0 rgba(0,0,0,.35);
+}
+
+.expanded-window .modal-head { margin: 0; }
+.expanded-body {
+  margin: 3px;
+  padding: 9px;
+  background: #c0c0c0;
+}
+
+.intro-modal { width: min(390px, calc(100vw - 32px)); }
+.intro-modal .window-body { margin: 12px 10px 10px; }
+.intro-modal h2 { margin: 0 0 10px; color: #000080; }
+.intro-modal p { color: #000; font-size: 11px; line-height: 1.45; }
+.intro-actions { display: flex; justify-content: center; }
+.intro-modal button.primary { flex: none; min-width: 90px; }
+
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 235px minmax(280px, 1fr) 270px; }
+}
+
+@media (max-width: 760px) {
+  html, body, #root { overflow: auto; }
+  .layout {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+  .sidebar, .infopanel { overflow: visible; }
+  .board { min-height: 55vh; order: -1; }
 }

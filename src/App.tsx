@@ -16,10 +16,22 @@ export default function App() {
       <InfoPanel />
       {introPending && (
         <div className="intro-overlay">
-          <div className="intro-modal">
-            <h2>Crisis Flashpoint</h2>
-            <p>Kazrek is poised to march into the demilitarized zone it claims as holy ground.</p>
-            <button className="primary" onClick={beginGame}>Begin Game</button>
+          <div className="intro-modal window">
+            <div className="title-bar">
+              <div className="title-bar-text">Escalation.exe</div>
+              <div className="title-bar-controls" aria-hidden="true">
+                <button aria-label="Minimize" />
+                <button aria-label="Maximize" />
+                <button aria-label="Close" />
+              </div>
+            </div>
+            <div className="window-body">
+              <h2>Crisis Flashpoint</h2>
+              <p>Kazrek is poised to march into the demilitarized zone it claims as holy ground.</p>
+              <div className="intro-actions">
+                <button className="primary" onClick={beginGame}>Begin Game</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
