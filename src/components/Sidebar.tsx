@@ -488,7 +488,7 @@ export function Sidebar() {
             )}
           </div>}
 
-          <div className="panel diplomacy-panel">
+          <div className="panel diplomacy-panel sidebar-diplomacy">
             <div className="panel-header">
               <h2>Diplomacy</h2>
               <button className="expand-btn" onClick={() => setExpandedDiplomacy(true)} title="Expand diplomacy" aria-label="Expand diplomacy">□</button>
@@ -510,7 +510,7 @@ export function Sidebar() {
             </div>
           )}
 
-          <div className="panel">
+          <div className="panel selected-force-panel">
             <h2>{currentExiled ? 'Government in Exile' : targeting ? 'Choose a target' : selectedBase ? 'Air Base' : 'Selected Force'}</h2>
             {currentExiled ? (
               <p className="hint flush">This government controls no cities. It can send statements, ask for ceasefires or peace, and mediate agreements.</p>
@@ -551,7 +551,7 @@ export function Sidebar() {
             )}
           </div>
 
-          <div className="panel actions">
+          <div className="panel actions sidebar-actions">
             <label className="auto-turn-toggle">
               <input
                 type="checkbox"

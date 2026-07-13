@@ -14,7 +14,7 @@ const FORCE_GLYPH: Record<Force['type'], string> = {
 }
 
 const TERRAIN_FILL: Record<Tile['terrain'], string> = {
-  plains: '#3d4a36', mountain: '#54504a', sea: 'url(#water)', island: 'url(#water)',
+  plains: '#355f54', mountain: '#596574', sea: 'url(#water)', island: 'url(#water)',
 }
 
 export function HexMap() {
@@ -97,10 +97,9 @@ export function HexMap() {
   return (
     <svg className="hexmap" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
       <defs>
-        <pattern id="water" width="22" height="16" patternUnits="userSpaceOnUse">
-          <rect width="22" height="16" fill="#15405f" />
-          <path d="M0 6 q 5.5 -4 11 0 t 11 0" stroke="#2f7bb0" strokeWidth="1.3" fill="none" opacity="0.55" />
-          <path d="M0 13 q 5.5 -4 11 0 t 11 0" stroke="#22618f" strokeWidth="1.1" fill="none" opacity="0.45" />
+        <pattern id="water" width="12" height="12" patternUnits="userSpaceOnUse">
+          <rect width="12" height="12" fill="#000080" />
+          <path d="M0 2 H5 V4 H10 M3 8 H8 V10 H12" stroke="#1084d0" strokeWidth="1" fill="none" opacity="0.8" />
         </pattern>
         <filter id="glow" x="-150%" y="-150%" width="400%" height="400%">
           <feGaussianBlur stdDeviation="2.6" result="b" />
@@ -114,8 +113,8 @@ export function HexMap() {
         const pts = hexCorners(cx, cy)
         return (
           <g key={key(t.hex)} onClick={() => clickHex(t.hex)} onMouseEnter={() => setInspect(t.hex)} className="tile-g">
-            <polygon points={pts} fill={TERRAIN_FILL[t.terrain]} stroke="rgba(255,255,255,0.05)" strokeWidth={0.6} className="tile" />
-            {t.terrain === 'island' && <ellipse cx={cx} cy={cy} rx={9} ry={6} fill="#8a7355" opacity={0.85} pointerEvents="none" />}
+            <polygon points={pts} fill={TERRAIN_FILL[t.terrain]} stroke="#c0c0c0" strokeOpacity={0.38} strokeWidth={0.75} className="tile" />
+            {t.terrain === 'island' && <rect x={cx - 8} y={cy - 5} width={16} height={10} fill="#35735f" stroke="#00ffff" strokeWidth={0.7} pointerEvents="none" />}
             {t.owner && <polygon points={pts} fill={game.factions[t.owner].color} fillOpacity={0.16} pointerEvents="none" />}
           </g>
         )
@@ -190,7 +189,7 @@ export function HexMap() {
             onClick={selectable ? () => selectInstall(inst.id) : undefined}
           >
             <title>{f.name} — {inst.type.replace('_', ' ')} (integrity {inst.integrity}%{inst.maxCharges != null ? `, ${inst.charges}/${inst.maxCharges} sorties` : ''})</title>
-            <rect x={cx - 7} y={cy - 13} width={14} height={14} rx={3} fill="#0b0f17"
+            <rect x={cx - 7} y={cy - 13} width={14} height={14} fill="#c0c0c0"
               stroke={selectedBase ? '#ffffff' : f.color} strokeWidth={selectedBase ? 2.4 : 1.3} opacity={0.95} />
             <text x={cx} y={cy - 3} textAnchor="middle" fontSize="9" fill={f.color} fontWeight="bold">{INSTALL_GLYPH[inst.type]}</text>
           </g>
@@ -205,8 +204,9 @@ export function HexMap() {
         return (
           <g key={'cap' + f.id} pointerEvents="none">
             <title>{f.name}</title>
-            <rect x={cx - w / 2} y={cy - 27} width={w} height={12} rx={6} fill="#0b0f17" opacity={0.85} stroke={f.color} strokeWidth={1} />
-            <text x={cx} y={cy - 18} textAnchor="middle" fontSize="8.5" fontWeight={700} fill={f.color} style={{ letterSpacing: '0.5px' }}>{abbr}</text>
+            <rect x={cx - w / 2} y={cy - 27} width={w} height={12} fill="#c0c0c0" stroke="#ffffff" strokeWidth={1.6} />
+            <rect x={cx - w / 2 + 1.6} y={cy - 25.4} width={w - 3.2} height={8.8} fill="#000080" stroke={f.color} strokeWidth={0.8} />
+            <text x={cx} y={cy - 18} textAnchor="middle" fontSize="8.5" fontWeight={700} fill="#ffffff" style={{ letterSpacing: '0.5px' }}>{abbr}</text>
           </g>
         )
       })}
@@ -228,8 +228,8 @@ export function HexMap() {
               return (
                 <g key={force.id} opacity={isCurrent ? 1 : 0.7}>
                   <title>{f.name} — {force.type.replace('_', ' ')} ({force.health}/{force.maxHealth} HP, str {force.strength}{force.maxCharges != null ? `, ${force.charges}/${force.maxCharges} ⚡` : ''})</title>
-                  <circle cx={x} cy={rowY} r={selected ? 8 : 6.5} fill={f.color}
-                    stroke={selected ? '#ffffff' : '#0b0f17'} strokeWidth={selected ? 2.2 : 1.3} />
+                  <rect x={x - (selected ? 7.5 : 6)} y={rowY - (selected ? 7.5 : 6)} width={selected ? 15 : 12} height={selected ? 15 : 12} fill={f.color}
+                    stroke={selected ? '#ffffff' : '#000000'} strokeWidth={selected ? 2.2 : 1.3} />
                   <text x={x} y={rowY + 3} textAnchor="middle" fontSize="8" fill="#0b0f17" fontWeight="bold" pointerEvents="none">
                     {FORCE_GLYPH[force.type]}
                   </text>
@@ -459,8 +459,8 @@ function AttackAnim({
       {!quiet && <circle cx={to.cx} cy={to.cy} r={6 + 18 * gun} fill="#fb923c" opacity={0.45 * opacity} filter="url(#glow)" />}
       {force && color && (
         <g opacity={trot < 1 ? 1 : Math.max(0, 1 - (t - 0.92) / 0.08)}>
-          <circle cx={tx} cy={ty} r={selected ? 8 : 6.5} fill={color}
-            stroke={selected ? '#ffffff' : '#0b0f17'} strokeWidth={selected ? 2.2 : 1.3} />
+          <rect x={tx - (selected ? 7.5 : 6)} y={ty - (selected ? 7.5 : 6)} width={selected ? 15 : 12} height={selected ? 15 : 12} fill={color}
+            stroke={selected ? '#ffffff' : '#000000'} strokeWidth={selected ? 2.2 : 1.3} />
           <text x={tx} y={ty + 3} textAnchor="middle" fontSize="8" fill="#0b0f17" fontWeight="bold" pointerEvents="none">
             {FORCE_GLYPH[force.type]}
           </text>
