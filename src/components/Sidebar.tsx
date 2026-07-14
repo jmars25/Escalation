@@ -376,9 +376,30 @@ export function Sidebar() {
     </div>
   )
 
+  const renderTurnControls = () => (
+    <div className="panel actions sidebar-actions">
+      <h2>Turn Controls</h2>
+      <label className="auto-turn-toggle">
+        <input
+          type="checkbox"
+          checked={autoTakeTurns}
+          onChange={(event) => handleAutoTakeTurns(event.target.checked)}
+        />
+        <span>Auto AI turns until Aurelia</span>
+      </label>
+      <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={turnLocked}>
+        End {current.name}{currentExiled ? ' Exile' : ''} Turn ▸
+      </button>
+      <button className="ghost" onClick={() => void runAiTurn()} disabled={turnLocked}>
+        {aiPending ? "AI thinking..." : "AI: Take Turn"}
+      </button>
+    </div>
+  )
+
   return (
     <aside className="sidebar">
-      <div className="panel">
+      <div className="panel sidebar-status">
+        <h2>Escalation Command</h2>
         <h1>ESCALATION</h1>
         <div className="row-between" style={{ marginTop: '4px' }}>
           <span className="turn">Round {game.turn}</span>
@@ -399,6 +420,11 @@ export function Sidebar() {
 
       </div>
 
+      <div className="panel operations-window">
+        <div className="panel-header">
+          <h2>Operations</h2>
+        </div>
+        <div className="operations-scroll">
       {publicOpinion && (
         <div className="panel opinion-panel">
           <div className="opinion-kicker">Aurelian Opinion - Round {publicOpinion.turn}</div>
@@ -551,24 +577,11 @@ export function Sidebar() {
             )}
           </div>
 
-          <div className="panel actions sidebar-actions">
-            <label className="auto-turn-toggle">
-              <input
-                type="checkbox"
-                checked={autoTakeTurns}
-                onChange={(event) => handleAutoTakeTurns(event.target.checked)}
-              />
-              <span>Auto AI turns until Aurelia</span>
-            </label>
-            <button className="primary" onClick={endTurn} style={{ background: current.color }} disabled={turnLocked}>
-              End {current.name}{currentExiled ? ' Exile' : ''} Turn ▸
-            </button>
-            <button className="ghost" onClick={() => void runAiTurn()} disabled={turnLocked}>
-              {aiPending ? "AI thinking..." : "AI: Take Turn"}
-            </button>
-          </div>
         </>
       )}
+        </div>
+      </div>
+      {!game.regimeFallen && renderTurnControls()}
       {renderIncomingCeasefireModal()}
     </aside>
   )

@@ -550,6 +550,84 @@ textarea {
 .sidebar-diplomacy { order: 2; }
 .sidebar-actions { order: 3; }
 
+.sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 0;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.sidebar > .panel { min-height: 0; }
+.sidebar-status,
+.sidebar-actions {
+  position: static;
+}
+
+.operations-window {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 3px;
+  overflow: hidden;
+}
+.operations-window > .panel-header {
+  flex: none;
+  margin: 0 0 3px;
+}
+.operations-scroll {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  padding: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #c0c0c0;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #000,
+    inset -2px -2px #dfdfdf, inset 2px 2px #404040;
+  scrollbar-color: #c0c0c0 #dfdfdf;
+}
+.operations-scroll > .panel {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  background: #c0c0c0;
+  border: 0;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080;
+}
+.operations-scroll > .panel > h2 {
+  display: table;
+  min-height: 0;
+  margin: -13px 0 7px -2px;
+  padding: 0 4px;
+  color: #000;
+  background: #c0c0c0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  line-height: 13px;
+}
+.operations-scroll > .panel > .panel-header {
+  min-height: 18px;
+  margin: -4px -3px 7px;
+  padding: 0 3px 4px;
+  color: #000;
+  background: transparent;
+  border-bottom: 1px solid #808080;
+}
+.operations-scroll > .panel > .panel-header h2 {
+  color: #000;
+  font-weight: 700;
+}
+.operations-scroll .procurement-panel .seg-row:not(.compact) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .infopanel {
   padding: 0;
   gap: 6px;
