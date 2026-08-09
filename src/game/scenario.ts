@@ -535,6 +535,8 @@ export function buildInitialState(): GameState {
     hostilePairs: [],
     ceasefireRequests: [],
     diplomaticMessages: [],
+    decisions: [],
+    aidSentTurn: {},
     log: [
       { turn: 1, kind: 'system', text: 'Crisis begins. Radical Kazrek presses its religious claim to the demilitarized zone on Aurelias shores and masses an army group to march in and seize it.' },
       { turn: 1, kind: 'system', text: 'Backing Kazrek down is hard; doing nothing signals weakness. Aurelia moves first — step each nation through its turn with “End Turn”.' },

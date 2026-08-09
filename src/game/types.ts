@@ -76,6 +76,7 @@ export type ProcurementProjectType = 'army_group' | 'missile_battery' | 'naval_g
 export type AidPackageType = 'economic' | 'arms'
 export type CeasefireResponse = 'accepted' | 'rejected'
 export type CeasefireRequestKind = 'ceasefire' | 'peace_offer' | 'mediation'
+export type StrikeIntensity = 'limited' | 'full'
 
 export interface ProcurementProject {
   type: ProcurementProjectType
@@ -191,6 +192,67 @@ export interface PublicOpinionArticle {
   preferredCourse: string
 }
 
+/** Every legal state-changing choice available to either the UI or an agent. */
+export type Action =
+  | { type: 'move_force';             forceId: string; to: Hex }
+  | { type: 'claim_hex';              forceId: string }
+  | { type: 'force_strike';           forceId: string; target: Hex; intensity: StrikeIntensity }
+  | { type: 'air_strike';             baseId: string;  target: Hex; intensity: StrikeIntensity }
+  | { type: 'set_procurement_policy'; policy: ProcurementPolicy }
+  | { type: 'set_procurement_burden'; burden: ProcurementBurden }
+  | { type: 'start_procurement';      projectType: ProcurementProjectType }
+  | { type: 'send_aid';               targetId: string; aidType: AidPackageType }
+  | { type: 'toggle_trade';           targetId: string }
+  | { type: 'send_message';           targetId: string; message: string }
+  | { type: 'propose_ceasefire';      targetId: string; message: string }
+  | { type: 'propose_peace';          targetId: string; message: string; returnHexes?: Hex[] }
+  | { type: 'mediate_peace';          sideAId: string; sideBId: string; message: string; returnHexes?: Hex[] }
+  | { type: 'return_land';            hex: Hex; toId: string }
+  | { type: 'respond_ceasefire';      requestId: string; response: CeasefireResponse; message: string }
+  | { type: 'end_turn' }
+
+export type DecisionRisk = 'low' | 'medium' | 'high' | 'catastrophic'
+export type DecisionExecutionStatus = 'applied' | 'illegal' | 'no_op'
+
+export interface DecisionAssessment {
+  /** Concise, player-facing judgment rather than private chain-of-thought. */
+  situation: string
+  intent: string
+  objectiveIndexes: number[]
+  redLineIndexes: number[]
+  confidence: number
+  risk: DecisionRisk
+  alternatives: Array<{ option: string; rejectedBecause: string }>
+}
+
+export interface DecisionExecution {
+  action: Action
+  status: DecisionExecutionStatus
+  result: string
+}
+
+export interface DecisionTelemetry {
+  provider: 'anthropic' | 'openai'
+  model: string
+  modelCalls: number
+  latencyMs: number
+  inputTokens?: number
+  outputTokens?: number
+  cachedInputTokens?: number
+  promptVersion: string
+}
+
+export interface DecisionRecord {
+  id: string
+  turn: number
+  factionId: FactionId
+  assessment: DecisionAssessment
+  plannedActions: Action[]
+  executions: DecisionExecution[]
+  publicStatement?: string
+  telemetry: DecisionTelemetry
+}
+
 export interface GameState {
   /** Round number. Increments after every faction has taken its turn. */
   turn: number
@@ -221,6 +283,10 @@ export interface GameState {
   /** Diplomatic notes and ceasefire exchanges visible to agents and the player. */
   diplomaticMessages: DiplomaticMessage[]
   log: GameEvent[]
+  /** Structured, inspectable AI decisions. Newest first; capped by the harness. */
+  decisions?: DecisionRecord[]
+  /** One aid package per sending government per round. */
+  aidSentTurn?: Record<FactionId, number>
   /** Factions whose support has hit zero. This is pressure, not a hard game over. */
   supportCrises?: FactionId[]
   /** Set when a government's support collapses — the game is over. */

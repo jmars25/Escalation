@@ -18,6 +18,12 @@ What works today:
   strikes, stage embargoes, procure units, and send aid.
 - LLM-driven AI turns use the same engine actions as the player. The prompt frames the
   game as a political crisis simulation, not a simple territory grab.
+- Each AI turn produces a bounded, structured cabinet plan: a situation assessment,
+  intent, risk/confidence, rejected alternatives, up to four legal actions, and a
+  public statement. The server still adjudicates every selected action.
+- The in-game **Decision Feed** makes that reasoning legible to players. Its expandable
+  **Lab trace** shows action outcomes, latency, model calls, and token/cache usage for
+  portfolio demos and cost tuning.
 - Diplomacy supports short state-to-state messages, ceasefire requests, peace offers,
   mediated peace between two other nations, and return-land terms.
 - Player-facing diplomacy resolves immediately when a request targets the player. The
@@ -27,6 +33,9 @@ What works today:
   cannot command forces, trade, aid, procurement, or territory.
 - City occupation transfers the city icon to the occupying nation's color.
 - A local LLM agent route can run AI turns through OpenAI or Anthropic tool calls.
+- AI turns normally require one model call. A malformed plan gets at most one repair
+  call; short action IDs, a pruned legal-action catalog, a four-action ceiling, and a
+  cache-friendly prompt prefix keep context and runaway tool-loop costs down.
 - Procedural sound via the Web Audio API (no asset files).
 
 See [`DESIGN.md`](DESIGN.md) for the full design and roadmap.
@@ -87,4 +96,7 @@ npm run build       # production build
 TypeScript, React, Vite, Zustand, SVG. No game engine; it is turn-based and text-heavy,
 so the browser is the right tool. The LLM integration runs through a thin local route so
 your API key never touches the client. Set `AI_PROVIDER=openai` or
-`AI_PROVIDER=anthropic` to choose the backend; OpenAI is the default.
+`AI_PROVIDER=anthropic` to choose the backend; OpenAI is the default. The provider
+adapter also normalizes input, output, and cached-input token telemetry so the same
+Decision Lab works with either backend. The displayed assessment is an authored game
+brief, not hidden model chain-of-thought.

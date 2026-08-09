@@ -1,5 +1,5 @@
 import type { Action } from '../../src/game/engine.ts'
-import type { GameState } from '../../src/game/types.ts'
+import type { DecisionRecord, GameState } from '../../src/game/types.ts'
 
 export type AgentProvider = 'anthropic' | 'openai'
 
@@ -15,12 +15,14 @@ export type AgentResult = {
   finalState: GameState
   log: string[]
   pressStatement?: string
+  decision?: DecisionRecord
 }
 
 export type JsonSchemaObject = {
   type: 'object'
   properties: Record<string, unknown>
   required?: string[]
+  additionalProperties?: boolean
 }
 
 export type AgentTool = {
@@ -42,7 +44,18 @@ export type ModelToolResult = {
   isError?: boolean
 }
 
+export type ModelUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  cachedInputTokens?: number
+}
+
+export type ModelTurnResult = {
+  toolCalls: ModelToolCall[]
+  usage: ModelUsage
+}
+
 export type AgentModelAdapter = {
-  nextTurn: (systemPrompt: string) => Promise<ModelToolCall[]>
+  nextTurn: (systemPrompt: string) => Promise<ModelTurnResult>
   addToolResults: (results: ModelToolResult[]) => void
 }

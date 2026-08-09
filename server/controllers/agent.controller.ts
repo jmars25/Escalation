@@ -12,6 +12,10 @@ import type { FactionId, GameState } from '../../src/game/types.ts'
 const agentTurn = asyncHandler(async (req, res) => {
   const { state, factionId } = req.body as { state: GameState; factionId: FactionId }
   assertValid(state && factionId, 'state and factionId required')
+  assertValid(
+    Array.isArray(state.order) && Number.isInteger(state.turnIndex) && state.order[state.turnIndex] === factionId,
+    'factionId must match the current turn',
+  )
   ensureApiKey()
   res.json(await runAgentTurn(state, factionId))
 })

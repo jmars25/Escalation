@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useGameStore } from '../store/useGameStore'
 import { PROJECT_LABEL, embargoOwner, isEmbargoed, procurementRate, projectCost } from '../game/engine'
 import { key } from '../game/hexUtils'
-import type { Force, GameEvent, GameState, Installation } from '../game/types'
+import type { Action, DecisionRecord, Force, GameEvent, GameState, Installation } from '../game/types'
 
 /** Color a 0–100 political stat (support / economy). */
 function barColor(v: number): string {
@@ -43,10 +43,33 @@ function pressStatementText(event: GameEvent): string {
   return match?.[1]?.trim() || event.text
 }
 
+function actionText(game: GameState, action: Action): string {
+  const factionName = (id: string) => game.factions[id]?.name ?? id
+  const hex = (h: { q: number; r: number }) => `(${h.q},${h.r})`
+  switch (action.type) {
+    case 'move_force': return `Move ${action.forceId} to ${hex(action.to)}`
+    case 'claim_hex': return `Claim territory with ${action.forceId}`
+    case 'force_strike': return `${action.intensity} strike on ${hex(action.target)}`
+    case 'air_strike': return `${action.intensity} air strike on ${hex(action.target)}`
+    case 'set_procurement_policy': return `Set procurement policy: ${action.policy}`
+    case 'set_procurement_burden': return `Set procurement burden: ${action.burden}`
+    case 'start_procurement': return `Start procurement: ${PROJECT_LABEL[action.projectType]}`
+    case 'send_aid': return `Send ${action.aidType} aid to ${factionName(action.targetId)}`
+    case 'toggle_trade': return `Change trade policy with ${factionName(action.targetId)}`
+    case 'send_message': return `Message ${factionName(action.targetId)}`
+    case 'propose_ceasefire': return `Propose ceasefire to ${factionName(action.targetId)}`
+    case 'propose_peace': return `Offer peace to ${factionName(action.targetId)}`
+    case 'mediate_peace': return `Mediate ${factionName(action.sideAId)}–${factionName(action.sideBId)}`
+    case 'return_land': return `Return ${hex(action.hex)} to ${factionName(action.toId)}`
+    case 'respond_ceasefire': return `${action.response === 'accepted' ? 'Accept' : 'Reject'} ceasefire`
+    case 'end_turn': return 'End turn'
+  }
+}
+
 /** Right-hand column: faction roster grouped by side + event log. The log is a
  *  stand-in for the Phase 3 "intelligence assessment" panel (agent reasoning). */
 export function InfoPanel() {
-  const [expandedLog, setExpandedLog] = useState<'diplomacy' | 'dispatches' | null>(null)
+  const [expandedLog, setExpandedLog] = useState<'decisions' | 'diplomacy' | 'dispatches' | null>(null)
   const game = useGameStore((s) => s.game)
   const inspectHex = useGameStore((s) => s.inspectHex)
   const toggleTrade = useGameStore((s) => s.toggleTrade)
@@ -58,6 +81,7 @@ export function InfoPanel() {
   const ceasefires = game.ceasefires ?? []
   const pressStatements = game.log.filter(isPressStatement)
   const dispatchEvents = game.log.filter(isOperationalEvent)
+  const decisions = game.decisions ?? []
 
   const tile = inspectHex ? game.tiles[key(inspectHex)] : undefined
   const tileInstalls = inspectHex ? game.installations.filter((i) => key(i.hex) === key(inspectHex)) : []
@@ -109,6 +133,60 @@ export function InfoPanel() {
       )}
     </ul>
   )
+
+  const renderDecisionCard = (decision: DecisionRecord, expanded = false) => {
+    const faction = game.factions[decision.factionId]
+    const objective = decision.assessment.objectiveIndexes
+      .map((index) => faction?.objectives[index])
+      .filter(Boolean)
+      .join(' · ')
+    const substantiveExecutions = decision.executions.filter((execution) => execution.action.type !== 'end_turn')
+    const tokens = (decision.telemetry.inputTokens ?? 0) + (decision.telemetry.outputTokens ?? 0)
+    return (
+      <article key={decision.id} className={`decision-card risk-${decision.assessment.risk}`}>
+        <div className="decision-head">
+          <span className="dot" style={{ background: faction?.color ?? '#808080' }} />
+          <strong>{faction?.name ?? decision.factionId}</strong>
+          <span className="decision-risk">{decision.assessment.risk} risk</span>
+          <span className="decision-confidence">{decision.assessment.confidence}%</span>
+        </div>
+        <p className="decision-situation">{decision.assessment.situation}</p>
+        {objective && <div className="decision-line"><strong>Goal:</strong> {objective}</div>}
+        <div className="decision-line"><strong>Intent:</strong> {decision.assessment.intent}</div>
+        <div className="decision-line">
+          <strong>Chose:</strong>{' '}
+          {substantiveExecutions.length
+            ? substantiveExecutions.map((execution) => actionText(game, execution.action)).join(' · ')
+            : 'Restraint / maintain posture'}
+        </div>
+        {decision.assessment.alternatives[0] && (
+          <div className="decision-line decision-alternative">
+            <strong>Rejected:</strong> {decision.assessment.alternatives[0].option} — {decision.assessment.alternatives[0].rejectedBecause}
+          </div>
+        )}
+        {(expanded || decision === decisions[0]) && (
+          <details className="decision-trace" open={expanded || undefined}>
+            <summary>Lab trace</summary>
+            <div className="trace-meta">
+              {decision.telemetry.model} · {decision.telemetry.latencyMs}ms · {decision.telemetry.modelCalls} call{decision.telemetry.modelCalls === 1 ? '' : 's'}
+              {tokens > 0 ? ` · ${tokens} tokens` : ''}
+              {(decision.telemetry.cachedInputTokens ?? 0) > 0 ? ` · ${decision.telemetry.cachedInputTokens} cached` : ''}
+              {' · '}{decision.telemetry.promptVersion}
+            </div>
+            <ol className="trace-list">
+              {decision.executions.map((execution, index) => (
+                <li key={`${decision.id}-${index}`} className={`trace-${execution.status}`}>
+                  <span>{execution.status === 'applied' ? '✓' : execution.status === 'illegal' ? '×' : '–'}</span>
+                  <span>{actionText(game, execution.action)}</span>
+                  <small>{execution.result}</small>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </article>
+    )
+  }
 
   return (
     <section className="infopanel">
@@ -186,6 +264,16 @@ export function InfoPanel() {
         ))}
       </div>
 
+      <div className="panel decision-panel">
+        <div className="panel-header">
+          <h2>Decision Feed</h2>
+          {decisions.length > 0 && <button className="expand-btn" onClick={() => setExpandedLog('decisions')} title="Expand decisions" aria-label="Expand decisions">□</button>}
+        </div>
+        {decisions.length > 0
+          ? decisions.slice(0, 2).map((decision) => renderDecisionCard(decision))
+          : <p className="hint flush">Structured AI assessments will appear here after each agent turn.</p>}
+      </div>
+
       {showDiplomacyLog && (
         <div className="panel diplomacy-log">
           <div className="panel-header">
@@ -206,13 +294,15 @@ export function InfoPanel() {
 
       {expandedLog && (
         <div className="modal-backdrop" onClick={() => setExpandedLog(null)}>
-          <div className="expanded-window wide" role="dialog" aria-modal="true" aria-label={expandedLog === 'diplomacy' ? 'Expanded diplomacy' : 'Expanded dispatches'} onClick={(event) => event.stopPropagation()}>
+          <div className="expanded-window wide" role="dialog" aria-modal="true" aria-label={expandedLog === 'decisions' ? 'Expanded decisions' : expandedLog === 'diplomacy' ? 'Expanded diplomacy' : 'Expanded dispatches'} onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
-              <h2>{expandedLog === 'diplomacy' ? 'Diplomacy' : 'Dispatches'}</h2>
+              <h2>{expandedLog === 'decisions' ? 'Decision Lab' : expandedLog === 'diplomacy' ? 'Diplomacy' : 'Dispatches'}</h2>
               <button className="expand-btn close-btn" onClick={() => setExpandedLog(null)} title="Close" aria-label="Close expanded window">x</button>
             </div>
-            <div className={`expanded-body ${expandedLog === 'diplomacy' ? 'diplomacy-log expanded-log' : 'dispatch-log expanded-log'}`}>
-              {expandedLog === 'diplomacy' ? renderDiplomacyLog() : renderDispatchLog()}
+            <div className={`expanded-body ${expandedLog === 'decisions' ? 'decision-log expanded-log' : expandedLog === 'diplomacy' ? 'diplomacy-log expanded-log' : 'dispatch-log expanded-log'}`}>
+              {expandedLog === 'decisions'
+                ? decisions.map((decision) => renderDecisionCard(decision, true))
+                : expandedLog === 'diplomacy' ? renderDiplomacyLog() : renderDispatchLog()}
             </div>
           </div>
         </div>

@@ -28,12 +28,13 @@ beforeEach(() => {
 describe('POST /api/agent-turn', () => {
   it('runs the turn and returns its result', async () => {
     vi.mocked(runAgentTurn).mockResolvedValue({ actions: [], finalState: { turn: 2 }, log: ['x'] } as never)
+    const state = { turn: 1, order: ['aurelia'], turnIndex: 0 }
 
-    const res = await request(app).post('/api/agent-turn').send({ state: { turn: 1 }, factionId: 'aurelia' })
+    const res = await request(app).post('/api/agent-turn').send({ state, factionId: 'aurelia' })
 
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ actions: [], finalState: { turn: 2 }, log: ['x'] })
-    expect(runAgentTurn).toHaveBeenCalledWith({ turn: 1 }, 'aurelia')
+    expect(runAgentTurn).toHaveBeenCalledWith(state, 'aurelia')
   })
 
   it('validates the body before checking the API key', async () => {
@@ -47,7 +48,9 @@ describe('POST /api/agent-turn', () => {
 
   it('returns 500 when the API key is missing', async () => {
     withKey(false)
-    const res = await request(app).post('/api/agent-turn').send({ state: { turn: 1 }, factionId: 'aurelia' })
+    const res = await request(app).post('/api/agent-turn').send({
+      state: { turn: 1, order: ['aurelia'], turnIndex: 0 }, factionId: 'aurelia',
+    })
 
     expect(res.status).toBe(500)
     expect(res.body).toEqual({ error: 'OPENAI_API_KEY not set' })
@@ -56,10 +59,22 @@ describe('POST /api/agent-turn', () => {
 
   it('maps an unexpected service error to 500', async () => {
     vi.mocked(runAgentTurn).mockRejectedValue(new Error('provider exploded'))
-    const res = await request(app).post('/api/agent-turn').send({ state: { turn: 1 }, factionId: 'aurelia' })
+    const res = await request(app).post('/api/agent-turn').send({
+      state: { turn: 1, order: ['aurelia'], turnIndex: 0 }, factionId: 'aurelia',
+    })
 
     expect(res.status).toBe(500)
     expect(res.body).toEqual({ error: 'Error: provider exploded' })
+  })
+
+  it('rejects a faction acting out of turn', async () => {
+    const res = await request(app).post('/api/agent-turn').send({
+      state: { turn: 1, order: ['aurelia', 'kazrek'], turnIndex: 0 }, factionId: 'kazrek',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body).toEqual({ error: 'factionId must match the current turn' })
+    expect(runAgentTurn).not.toHaveBeenCalled()
   })
 })
 

@@ -7,11 +7,14 @@
 // faction's turn instead of the human.
 
 import type {
-  AidPackageType, Alignment, CeasefireRequest, CeasefireResponse, Force, ForceType, GameState, Hex, Installation, InstallationType,
+  Action, AidPackageType, Alignment, CeasefireRequest, CeasefireResponse, Force, ForceType, GameState, Hex, Installation, InstallationType,
   PeaceTerm,
   ProcurementBurden, ProcurementPolicy, ProcurementProjectType,
+  StrikeIntensity,
 } from './types'
 import { distance, hexEquals, key, neighbors } from './hexUtils'
+
+export type { Action, StrikeIntensity } from './types'
 
 const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n))
 
@@ -542,7 +545,6 @@ export function claimHex(state: GameState, forceId: string): GameState {
 // --- Strikes (political instruments) --------------------------------------
 
 export type StrikeKind = 'air' | 'naval' | 'missile'
-export type StrikeIntensity = 'limited' | 'full'
 
 const STRIKE_RANGE = { naval: 3, missile: 4, air: 5 } as const
 // Damage vs structures (installations) — bases take a pounding over several hits.
@@ -739,6 +741,8 @@ export function sendAidPackage(state: GameState, fromId: string, toId: string, t
   const from = s.factions[fromId]
   const to = s.factions[toId]
   if (!from || !to || from.exiled || from.alignment === 'neutral' || from.alignment !== to.alignment) return state
+  s.aidSentTurn ??= {}
+  if (s.aidSentTurn[fromId] === s.turn || from.market <= 0) return state
 
   if (type === 'economic') {
     from.market = clamp(from.market - 6)
@@ -762,6 +766,7 @@ export function sendAidPackage(state: GameState, fromId: string, toId: string, t
     if (to.procurement.project) to.procurement.project.progress += 45
     log(s, { kind: 'system', faction: fromId, text: `${from.name} ships arms to ${to.name}. Their build queue accelerates.` })
   }
+  s.aidSentTurn[fromId] = s.turn
   completeProcurementIfReady(s, toId)
   checkRegime(s)
   return s
@@ -1495,24 +1500,6 @@ export function endFactionTurn(state: GameState): GameState {
 // Both operate purely on GameState — no UI state required. The mouse-driven
 // store is just one consumer of this layer; an LLM agent is another.
 
-export type Action =
-  | { type: 'move_force';             forceId: string; to: Hex }
-  | { type: 'claim_hex';              forceId: string }
-  | { type: 'force_strike';           forceId: string; target: Hex; intensity: StrikeIntensity }
-  | { type: 'air_strike';             baseId: string;  target: Hex; intensity: StrikeIntensity }
-  | { type: 'set_procurement_policy'; policy: ProcurementPolicy }
-  | { type: 'set_procurement_burden'; burden: ProcurementBurden }
-  | { type: 'start_procurement';      projectType: ProcurementProjectType }
-  | { type: 'send_aid';               targetId: string; aidType: AidPackageType }
-  | { type: 'toggle_trade';           targetId: string }
-  | { type: 'send_message';           targetId: string; message: string }
-  | { type: 'propose_ceasefire';      targetId: string; message: string }
-  | { type: 'propose_peace';          targetId: string; message: string; returnHexes?: Hex[] }
-  | { type: 'mediate_peace';          sideAId: string; sideBId: string; message: string; returnHexes?: Hex[] }
-  | { type: 'return_land';            hex: Hex; toId: string }
-  | { type: 'respond_ceasefire';      requestId: string; response: CeasefireResponse; message: string }
-  | { type: 'end_turn' }
-
 function exileActions(state: GameState, factionId: string): Action[] {
   const actions: Action[] = []
   const factions = Object.values(state.factions)
@@ -1601,7 +1588,7 @@ export function availableActions(state: GameState): Action[] {
     if (proc.project?.type !== projectType) actions.push({ type: 'start_procurement', projectType })
 
   // --- Diplomacy ---
-  if (faction.alignment !== 'neutral') {
+  if (faction.alignment !== 'neutral' && state.aidSentTurn?.[factionId] !== state.turn && faction.market > 0) {
     for (const other of Object.values(state.factions)) {
       if (other.id === factionId || other.alignment !== faction.alignment) continue
       actions.push({ type: 'send_aid', targetId: other.id, aidType: 'economic' })

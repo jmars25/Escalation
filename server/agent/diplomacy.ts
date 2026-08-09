@@ -64,7 +64,7 @@ export async function runPeaceDecision(
   const adapter = createAgentModelAdapter(config, CEASEFIRE_TOOLS, 'Answer the peace or ceasefire request.')
 
   for (let step = 0; step < MAX_RESPONSE_STEPS; step++) {
-    const toolCalls = await adapter.nextTurn(prompt)
+    const { toolCalls } = await adapter.nextTurn(prompt)
     const toolResults: ModelToolResult[] = []
 
     for (const call of toolCalls) {

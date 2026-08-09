@@ -258,6 +258,91 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
 ]
 
+export const TURN_PLAN_PROMPT_VERSION = 'turn-plan-v1'
+
+/** One structured call replaces the old action-at-a-time model loop. */
+export const TURN_PLAN_TOOL: AgentTool = {
+  name: 'submit_turn_plan',
+  description: 'Submit one concise political assessment and a bounded plan using legal action IDs.',
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      assessment: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          situation: { type: 'string', maxLength: 220 },
+          intent: { type: 'string', maxLength: 180 },
+          objectiveIndexes: { type: 'array', items: { type: 'integer' }, maxItems: 3 },
+          redLineIndexes: { type: 'array', items: { type: 'integer' }, maxItems: 3 },
+          confidence: { type: 'integer', minimum: 0, maximum: 100 },
+          risk: { type: 'string', enum: ['low', 'medium', 'high', 'catastrophic'] },
+          alternatives: {
+            type: 'array',
+            maxItems: 3,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                option: { type: 'string', maxLength: 120 },
+                rejectedBecause: { type: 'string', maxLength: 160 },
+              },
+              required: ['option', 'rejectedBecause'],
+            },
+          },
+        },
+        required: ['situation', 'intent', 'objectiveIndexes', 'redLineIndexes', 'confidence', 'risk', 'alternatives'],
+      },
+      actions: {
+        type: 'array',
+        maxItems: 4,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            actionId: { type: 'string' },
+            message: { type: 'string', maxLength: 420, description: 'Diplomatic text, or an empty string when unused.' },
+            returnHexes: {
+              type: 'array',
+              maxItems: 8,
+              description: 'Peace terms, or an empty list when unused.',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { q: { type: 'number' }, r: { type: 'number' } },
+                required: ['q', 'r'],
+              },
+            },
+          },
+          required: ['actionId', 'message', 'returnHexes'],
+        },
+      },
+      pressStatement: { type: 'string', maxLength: 420 },
+    },
+    required: ['assessment', 'actions', 'pressStatement'],
+  },
+}
+
+export type ActionCatalogEntry = { id: string; action: Action }
+
+/** Limit routine redeployments while preserving every provocative/hostile move. */
+export function buildActionCatalog(state: GameState, factionId: FactionId): ActionCatalogEntry[] {
+  const routineMoves = new Map<string, number>()
+  const selected = availableActions(state).filter((action) => {
+    if (action.type === 'end_turn') return false
+    if (action.type !== 'move_force') return true
+    const tile = state.tiles[key(action.to)]
+    const routine = (tile?.owner === factionId || !tile?.owner) && !tile?.contested && !tile?.dmz && !tile?.disputedBy?.length
+    if (!routine) return true
+    const used = routineMoves.get(action.forceId) ?? 0
+    if (used >= 4) return false
+    routineMoves.set(action.forceId, used + 1)
+    return true
+  })
+  return selected.map((action, index) => ({ id: `A${String(index + 1).padStart(2, '0')}`, action }))
+}
+
 export function buildSystemPrompt(state: GameState, factionId: FactionId): string {
   const faction = state.factions[factionId]
   const summary = summarizeState(state, factionId)
@@ -385,6 +470,123 @@ AVAILABLE ACTIONS:
 ${actionLines.join('\n') || '  (none - call end_turn)'}
 
 Take your turn using the tools. You may take multiple actions. When finished, call end_turn with a public pressStatement of no more than 3 sentences explaining why you acted.`
+}
+
+/** Stable-prefix, single-call prompt used by the bounded turn planner. */
+export function buildTurnPlanPrompt(
+  state: GameState,
+  factionId: FactionId,
+  catalog: ActionCatalogEntry[],
+): string {
+  const faction = state.factions[factionId]
+  const summary = summarizeState(state, factionId)
+  const actionLines = catalog.map(({ id, action }) => `  ${id}  ${planActionLabel(state, factionId, action)}`)
+  const objectiveLines = faction.objectives.map((objective, index) => `  [${index}] ${objective}`)
+  const redLineLines = faction.redLines.map((redLine, index) => `  [${index}] ${redLine}`)
+
+  return `ESCALATION TURN PLANNER ${TURN_PLAN_PROMPT_VERSION}
+
+Choose one bounded government turn in a geopolitical crisis simulation. Return exactly one submit_turn_plan tool call. Do not expose private scratch work or step-by-step reasoning; provide only the concise decision brief requested by the schema.
+
+POLITICAL RULES:
+- Pursue the government's mandate, doctrine, and red lines rather than treating this as a territory-maximizing board game.
+- Force, territorial entry, city attacks, and flashpoint claims require a serious political or military purpose.
+- Embargoes, aid, messages, restraint, and diplomacy are meaningful choices.
+- Select zero to four distinct action IDs in intended execution order. The server validates and executes them locally, then ends the turn automatically.
+- Use message for diplomatic actions and an empty string otherwise. Use returnHexes only with a peace or mediation action and an empty list otherwise.
+- If a ceasefire response is the only action available, select exactly one accept/reject action.
+- The pressStatement is public and may frame the decision politically; keep it to three sentences.
+
+CATALOG SHORTHAND: mv=move, str=strike, pol=policy, burden=build burden, proc=procurement; WAR, DMZ, front, disputed, neutral, and city are escalation warnings.
+
+FACTION: ${faction.name} (${faction.id})${faction.exiled ? ' — government in exile' : ''}
+
+OBJECTIVE INDEXES:
+${objectiveLines.join('\n') || '  (none)'}
+
+RED-LINE INDEXES:
+${redLineLines.join('\n') || '  (none)'}
+
+${summary}
+
+LEGAL ACTION CATALOG:
+${actionLines.join('\n') || '  (no substantive action; submit an empty actions list)'}`
+}
+
+function planActionLabel(state: GameState, factionId: FactionId, action: Action): string {
+  switch (action.type) {
+    case 'move_force':
+      return `mv ${compactActorLabel(state, action.forceId)}>${hexLabel(action.to)} ${compactTileContext(state, factionId, action.to, shouldWarnArmyEntry(state, action))}`
+    case 'claim_hex':
+      return `claim ${compactActorLabel(state, action.forceId)} ${compactClaimContext(state, factionId, action.forceId)}`
+    case 'force_strike':
+      return `${action.intensity === 'limited' ? 'L' : 'F'}-str ${compactActorLabel(state, action.forceId)}>${hexLabel(action.target)} ${compactStrikeContext(state, factionId, action.target, action.intensity)}`
+    case 'air_strike':
+      return `${action.intensity === 'limited' ? 'L' : 'F'}-air ${compactInstallationLabel(state, action.baseId)}>${hexLabel(action.target)} ${compactStrikeContext(state, factionId, action.target, action.intensity)}`
+    case 'send_aid':
+      return aidActionLabel(state, factionId, action.targetId, action.aidType)
+    case 'toggle_trade':
+      return `toggle_trade ${tradeActionLabel(state, factionId, action.targetId)}`
+    case 'respond_ceasefire':
+      return `${otherActionLabel(state, action)} decision=${action.response}`
+    default:
+      return otherActionLabel(state, action)
+  }
+}
+
+function compactActorLabel(state: GameState, forceId: string): string {
+  const force = state.forces.find((candidate) => candidate.id === forceId)
+  return force ? `${forceId}:${forceTypeToken(force.type)}` : forceId
+}
+
+function compactInstallationLabel(state: GameState, installId: string): string {
+  const install = state.installations.find((candidate) => candidate.id === installId)
+  return install ? `${installId}:${installTypeToken(install.type)}` : installId
+}
+
+function compactTileContext(state: GameState, factionId: FactionId, hex: Hex, warnArmyEntry = false): string {
+  const tile = state.tiles[key(hex)]
+  if (!tile) return 'unknown'
+  const actor = state.factions[factionId]
+  const owner = tile.owner ? state.factions[tile.owner] : undefined
+  const relation = !tile.owner
+    ? 'unclaimed'
+    : tile.owner === factionId
+      ? 'own'
+      : `${tile.owner}:${owner?.alignment === 'neutral' ? 'neutral' : owner?.alignment === actor?.alignment ? 'ally' : 'opp'}`
+  const flags = [
+    relation,
+    tile.terrain === 'plains' ? '' : tile.terrain,
+    tile.dmz ? 'DMZ' : '',
+    tile.contested ? 'front' : '',
+    tile.disputedBy?.length ? `disputed:${tile.disputedBy.join('/')}` : '',
+    warnArmyEntry && tile.owner !== factionId ? 'WAR' : '',
+  ].filter(Boolean)
+  return `[${flags.join(',')}]`
+}
+
+function compactClaimContext(state: GameState, factionId: FactionId, forceId: string): string {
+  const force = state.forces.find((candidate) => candidate.id === forceId)
+  if (!force) return '[territorial escalation]'
+  return `${hexLabel(force.hex)} ${compactTileContext(state, factionId, force.hex)} [territorial escalation]`
+}
+
+function compactStrikeContext(
+  state: GameState,
+  factionId: FactionId,
+  target: Hex,
+  intensity: 'limited' | 'full',
+): string {
+  const contents = [
+    ...installationsAt(state, target).map((install) =>
+      `${install.owner}:${installTypeToken(install.type)}${install.integrity}${install.type === 'city' ? '!' : ''}`,
+    ),
+    ...forcesAtHex(state, target).map((force) =>
+      `${force.owner}:${forceTypeToken(force.type)}${force.health}`,
+    ),
+  ]
+  const pressure = horizontalEscalationNote(state, factionId, target, intensity)
+  return `${compactTileContext(state, factionId, target)} [${contents.join(',') || 'empty'}${pressure ? ',Kazrek-linked pressure' : ''}]`
 }
 
 function hexLabel(hex: Hex): string {

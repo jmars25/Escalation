@@ -48,6 +48,7 @@ function getOpenAiClient(): OpenAI {
 
 function createAnthropicAdapter(model: string, tools: AgentTool[], initialUserMessage: string): AgentModelAdapter {
   const client = getAnthropicClient()
+  const forcedTool = strictSingleTool(tools)
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: initialUserMessage },
   ]
@@ -64,18 +65,27 @@ function createAnthropicAdapter(model: string, tools: AgentTool[], initialUserMe
         max_tokens: 1024,
         system: systemPrompt,
         tools: anthropicTools,
+        ...(forcedTool ? { tool_choice: { type: 'tool' as const, name: forcedTool } } : {}),
         messages,
       })
 
       messages.push({ role: 'assistant', content: response.content })
 
-      return response.content
+      const toolCalls = response.content
         .filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use')
         .map((call): ModelToolCall => ({
           id: call.id,
           name: call.name,
           input: call.input as Record<string, unknown>,
         }))
+      return {
+        toolCalls,
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          cachedInputTokens: numberField(response.usage, 'cache_read_input_tokens'),
+        },
+      }
     },
     addToolResults(results) {
       if (results.length === 0) return
@@ -94,6 +104,7 @@ function createAnthropicAdapter(model: string, tools: AgentTool[], initialUserMe
 
 function createOpenAiAdapter(model: string, tools: AgentTool[], initialUserMessage: string): AgentModelAdapter {
   const client = getOpenAiClient()
+  const forcedTool = strictSingleTool(tools)
   const conversation: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'user', content: initialUserMessage },
   ]
@@ -103,6 +114,7 @@ function createOpenAiAdapter(model: string, tools: AgentTool[], initialUserMessa
       name: tool.name,
       description: tool.description,
       parameters: tool.input_schema,
+      strict: tool.input_schema.additionalProperties === false,
     },
   }))
 
@@ -116,15 +128,22 @@ function createOpenAiAdapter(model: string, tools: AgentTool[], initialUserMessa
           ...conversation,
         ],
         tools: openAiTools,
-        tool_choice: 'auto',
+        tool_choice: forcedTool
+          ? { type: 'function', function: { name: forcedTool } }
+          : 'auto',
       })
 
       const message = response.choices[0]?.message
-      if (!message) return []
+      const usage = {
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        cachedInputTokens: response.usage?.prompt_tokens_details?.cached_tokens,
+      }
+      if (!message) return { toolCalls: [], usage }
 
       conversation.push(message)
 
-      return (message.tool_calls ?? []).map((call): ModelToolCall => {
+      const toolCalls = (message.tool_calls ?? []).map((call): ModelToolCall => {
         if (call.type !== 'function') {
           return {
             id: call.id,
@@ -140,6 +159,7 @@ function createOpenAiAdapter(model: string, tools: AgentTool[], initialUserMessa
           input: parseJsonObject(call.function.arguments),
         }
       })
+      return { toolCalls, usage }
     },
     addToolResults(results) {
       for (const result of results) {
@@ -147,6 +167,18 @@ function createOpenAiAdapter(model: string, tools: AgentTool[], initialUserMessa
       }
     },
   }
+}
+
+function strictSingleTool(tools: AgentTool[]): string | undefined {
+  return tools.length === 1 && tools[0].input_schema.additionalProperties === false
+    ? tools[0].name
+    : undefined
+}
+
+function numberField(value: unknown, key: string): number | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const field = (value as Record<string, unknown>)[key]
+  return typeof field === 'number' && Number.isFinite(field) ? field : undefined
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {
